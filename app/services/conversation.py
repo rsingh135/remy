@@ -1,0 +1,164 @@
+import json
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.memory.vector_store import query_memories
+from app.models.user import User
+from app.schemas.memory import MemoryQueryResult
+from app.services.bedrock import call_claude_with_tools
+from app.services.onboarding import handle_onboarding
+from app.services.sms_sender import send_sms
+from app.services.tools import execute_tool, is_affirmative
+
+logger = logging.getLogger(__name__)
+
+_PERSONA_INSTRUCTIONS: dict[str, str] = {
+    "chill_coach": (
+        "You are warm, supportive, and encouraging. "
+        "Be laid-back and affirming. Celebrate small wins. Never harsh or judgmental."
+    ),
+    "no_bs_peer": (
+        "You are a straight-talking peer. Skip fluff. Be direct, honest, and concise. "
+        "Call out excuses but stay supportive."
+    ),
+    "drill_sergeant": (
+        "You are demanding and relentless. Push hard. No excuses accepted. "
+        "Zero tolerance for slacking. High standards, always."
+    ),
+}
+
+_NIGHTLY_REDIS_KEY = "nightly_sent:{phone}:{date}"
+_STREAK_GRACE_HOURS = 3
+
+
+def build_system_prompt(user: User, memory_context: list[MemoryQueryResult]) -> str:
+    persona = _PERSONA_INSTRUCTIONS.get(user.persona_style or "chill_coach", "")
+    memories_text = "\n".join(
+        f"- [{m.category}] {m.memory_text}" for m in memory_context
+    ) or "None yet."
+
+    objective_labels = {
+        "study_buddy": "Study Buddy",
+        "habit_architect": "Habit Architect",
+        "idea_vault": "Idea Vault",
+        "hybrid": "Hybrid",
+    }
+
+    return f"""You are Remy, an AI accountability partner for {user.name}.
+
+PERSONA:
+{persona}
+
+USER PROFILE:
+- Name: {user.name}
+- Objective: {objective_labels.get(user.objective or '', 'Not set')}
+- Core Goal: {user.core_goal or 'Not set'}
+- Current Streak: {user.streak_count} days
+
+RELEVANT MEMORIES:
+{memories_text}
+
+HARD RULES — FOLLOW EXACTLY:
+1. BREVITY: Respond in 3 sentences or fewer. This is SMS. Be crisp.
+2. ACADEMIC GUARDRAIL: NEVER solve homework, write essays, or generate code blocks.
+   If asked, identify the core concept and respond with ONE guiding Socratic question only.
+3. ADDRESS BY NAME: Use {user.name}'s name naturally in responses.
+4. TONE: Maintain the persona tone above at all times.
+5. TOOLS: Use tools proactively when the user mentions reminders, logs, schedules, or memories.
+"""
+
+
+def _extract_text_content(response: dict) -> str:
+    for block in response.get("content", []):
+        if block.get("type") == "text":
+            return block["text"].strip()
+    return "Got it."
+
+
+async def get_or_create_user(phone: str, db: AsyncSession) -> User:
+    result = await db.execute(select(User).where(User.phone_number == phone))
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(phone_number=phone)
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+
+async def handle_main_conversation(user: User, message: str, db: AsyncSession) -> str:
+    await _check_and_update_streak(user, message, db)
+
+    memory_context = await query_memories(user.phone_number, message, db, top_k=3)
+    system_prompt = build_system_prompt(user, memory_context)
+    messages = [{"role": "user", "content": message}]
+
+    for _ in range(5):
+        response = await call_claude_with_tools(messages, system_prompt)
+
+        if response.get("stop_reason") == "end_turn":
+            return _extract_text_content(response)
+
+        if response.get("stop_reason") == "tool_use":
+            messages.append({"role": "assistant", "content": response["content"]})
+
+            tool_results = []
+            for block in response["content"]:
+                if block.get("type") == "tool_use":
+                    result = await execute_tool(block["name"], block["input"], user, db)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block["id"],
+                        "content": json.dumps(result),
+                    })
+
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            return _extract_text_content(response)
+
+    return "I hit a snag. Give me a second and try again?"
+
+
+async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -> None:
+    if not is_affirmative(message):
+        return
+
+    import redis as redis_lib
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    from app.config import get_settings
+
+    s = get_settings()
+    r = redis_lib.from_url(s.REDIS_URL, decode_responses=True)
+
+    today = date.today().isoformat()
+    redis_key = f"nightly_sent:{user.phone_number}:{today}"
+
+    if r.exists(redis_key):
+        user.streak_count += 1
+        await db.commit()
+        r.delete(redis_key)
+
+
+async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> None:
+    user = await get_or_create_user(phone, db)
+
+    if user.is_paused:
+        return
+
+    if user.onboarding_step == 0 and not user.name:
+        greeting = (
+            f"Hey! I'm Remy, your personal Life OS. What should I call you?"
+        )
+        await send_sms(phone, greeting)
+        return
+
+    if user.onboarding_step < 5:
+        reply = await handle_onboarding(user, message, db)
+    else:
+        reply = await handle_main_conversation(user, message, db)
+
+    await send_sms(user.phone_number, reply)
