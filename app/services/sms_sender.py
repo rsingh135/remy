@@ -4,37 +4,30 @@ import boto3
 
 from app.config import get_settings
 
-_pinpoint_client = None
+_eum_client = None
 
 
-def _get_pinpoint_client():
-    global _pinpoint_client
-    if _pinpoint_client is None:
+def _get_eum_client():
+    global _eum_client
+    if _eum_client is None:
         s = get_settings()
-        _pinpoint_client = boto3.client(
-            "pinpoint",
+        _eum_client = boto3.client(
+            "pinpoint-sms-voice-v2",
             region_name=s.AWS_REGION,
             aws_access_key_id=s.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=s.AWS_SECRET_ACCESS_KEY,
         )
-    return _pinpoint_client
+    return _eum_client
 
 
 def _send_sms_boto3(phone_number: str, message: str) -> None:
     s = get_settings()
-    client = _get_pinpoint_client()
-    client.send_messages(
-        ApplicationId=s.PINPOINT_APP_ID,
-        MessageRequest={
-            "Addresses": {phone_number: {"ChannelType": "SMS"}},
-            "MessageConfiguration": {
-                "SMSMessage": {
-                    "Body": message[:160],
-                    "MessageType": "TRANSACTIONAL",
-                    "OriginationNumber": s.AWS_PINPOINT_ORIGINATION_NUMBER,
-                }
-            },
-        },
+    client = _get_eum_client()
+    client.send_text_message(
+        DestinationPhoneNumber=phone_number,
+        OriginationIdentity=s.EUM_ORIGINATION_IDENTITY,
+        MessageBody=message[:160],
+        MessageType="TRANSACTIONAL",
     )
 
 

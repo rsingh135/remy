@@ -23,3 +23,5 @@ class ParsedSMSBody(BaseModel):
     messageBody: str
     destinationNumber: str
     messageKeyword: Optional[str] = None
+    inboundMessageId: Optional[str] = None
+    previousPublishedMessageId: Optional[str] = None

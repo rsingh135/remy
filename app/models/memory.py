@@ -11,7 +11,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.user import User
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024  # Titan Text Embeddings v2 default output dimension
 
 
 class Memory(Base):

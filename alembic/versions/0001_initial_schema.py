@@ -17,7 +17,7 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024  # Titan Text Embeddings v2 default output dimension
 
 
 def upgrade() -> None:
@@ -83,19 +83,17 @@ def upgrade() -> None:
     )
     op.create_index("ix_memories_category_user", "memories", ["category", "user_phone"])
 
-    bind = op.get_bind()
-    with bind.execution_options(isolation_level="AUTOCOMMIT"):
-        bind.execute(
-            text(
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_memories_hnsw "
-                "ON memories USING hnsw (embedding vector_cosine_ops) "
-                "WITH (m=16, ef_construction=64)"
-            )
+    op.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_memories_hnsw "
+            "ON memories USING hnsw (embedding vector_cosine_ops) "
+            "WITH (m=16, ef_construction=64)"
         )
+    )
 
 
 def downgrade() -> None:
     op.drop_table("memories")
     op.drop_table("events")
     op.drop_table("users")
-    op.execute("DROP EXTENSION IF EXISTS vector")
+    # vector extension is owned by the RDS master user — skip dropping it
