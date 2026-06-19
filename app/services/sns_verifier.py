@@ -33,6 +33,9 @@ def _build_canonical_string(envelope: InboundSNSMessage, raw: dict) -> bytes:
 async def verify_sns_signature(envelope: InboundSNSMessage, raw: dict | None = None) -> None:
     settings = get_settings()
 
+    if settings.DEV_SKIP_SNS_VERIFY:
+        return
+
     if not envelope.SigningCertURL.startswith(settings.SNS_SIGNING_CERT_URL_PREFIX):
         raise HTTPException(status_code=403, detail="Invalid SNS signing cert URL")
 

@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # App
     LOG_LEVEL: str = "INFO"
+    DEV_SKIP_SNS_VERIFY: bool = False  # Set true in tests to bypass signature check
 
 
 @lru_cache

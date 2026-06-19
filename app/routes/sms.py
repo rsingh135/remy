@@ -2,7 +2,7 @@ import json
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -36,7 +36,11 @@ async def sms_webhook(
         logger.warning("Unexpected SNS message type: %s", envelope.Type)
         return {"status": "ignored"}
 
-    sms = ParsedSMSBody.model_validate_json(envelope.Message)
+    try:
+        sms = ParsedSMSBody.model_validate_json(envelope.Message)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid SMS message format: {exc}") from exc
+
     await handle_incoming_sms(sms.originationNumber, sms.messageBody.strip(), db)
 
     return {"status": "ok"}

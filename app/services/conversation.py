@@ -34,6 +34,8 @@ _STREAK_GRACE_HOURS = 3
 
 
 def build_system_prompt(user: User, memory_context: list[MemoryQueryResult]) -> str:
+    from datetime import datetime, timezone
+
     persona = _PERSONA_INSTRUCTIONS.get(user.persona_style or "chill_coach", "")
     memories_text = "\n".join(
         f"- [{m.category}] {m.memory_text}" for m in memory_context
@@ -46,6 +48,8 @@ def build_system_prompt(user: User, memory_context: list[MemoryQueryResult]) -> 
         "hybrid": "Hybrid",
     }
 
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     return f"""You are Remy, an AI accountability partner for {user.name}.
 
 PERSONA:
@@ -57,6 +61,8 @@ USER PROFILE:
 - Core Goal: {user.core_goal or 'Not set'}
 - Current Streak: {user.streak_count} days
 
+CURRENT UTC TIME: {now_utc}
+
 RELEVANT MEMORIES:
 {memories_text}
 
@@ -67,6 +73,7 @@ HARD RULES — FOLLOW EXACTLY:
 3. ADDRESS BY NAME: Use {user.name}'s name naturally in responses.
 4. TONE: Maintain the persona tone above at all times.
 5. TOOLS: Use tools proactively when the user mentions reminders, logs, schedules, or memories.
+   When scheduling reminders, resolve relative times ("tomorrow", "in 2 hours") to absolute UTC datetimes using CURRENT UTC TIME above.
 """
 
 
@@ -77,7 +84,7 @@ def _extract_text_content(response: dict) -> str:
     return "Got it."
 
 
-async def get_or_create_user(phone: str, db: AsyncSession) -> User:
+async def get_or_create_user(phone: str, db: AsyncSession) -> tuple[User, bool]:
     result = await db.execute(select(User).where(User.phone_number == phone))
     user = result.scalar_one_or_none()
     if user is None:
@@ -85,7 +92,8 @@ async def get_or_create_user(phone: str, db: AsyncSession) -> User:
         db.add(user)
         await db.commit()
         await db.refresh(user)
-    return user
+        return user, True
+    return user, False
 
 
 async def handle_main_conversation(user: User, message: str, db: AsyncSession) -> str:
@@ -144,16 +152,13 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
 
 
 async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> None:
-    user = await get_or_create_user(phone, db)
+    user, newly_created = await get_or_create_user(phone, db)
 
     if user.is_paused:
         return
 
-    if user.onboarding_step == 0 and not user.name:
-        greeting = (
-            f"Hey! I'm Remy, your personal Life OS. What should I call you?"
-        )
-        await send_sms(phone, greeting)
+    if newly_created:
+        await send_sms(phone, "Hey! I'm Remy, your personal Life OS. What should I call you?")
         return
 
     if user.onboarding_step < 5:
