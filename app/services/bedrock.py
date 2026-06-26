@@ -92,6 +92,78 @@ TOOL_DEFINITIONS = [
             "required": ["category", "memory_text"],
         },
     },
+    {
+        "name": "get_google_auth_link",
+        "description": (
+            "Generate a Google account connection link and send it to the user. "
+            "Use this when the user asks to connect Google, link their calendar, "
+            "or enable Gmail integration. Returns a URL to include in your SMS reply."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "add_calendar_event",
+        "description": (
+            "Add an event to the user's primary Google Calendar. "
+            "Use this when the user asks to schedule, block time, or create a calendar event. "
+            "Resolve relative times ('tomorrow', 'next Monday') using CURRENT UTC TIME in your system prompt. "
+            "Always include the user's local timezone offset in the ISO 8601 strings."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Event title shown on the calendar",
+                },
+                "start_time_iso": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 datetime with timezone offset for event start, "
+                        "e.g. '2026-07-01T09:00:00-05:00'"
+                    ),
+                },
+                "end_time_iso": {
+                    "type": "string",
+                    "description": "ISO 8601 datetime with timezone offset for event end",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional longer description or notes for the event",
+                },
+            },
+            "required": ["summary", "start_time_iso", "end_time_iso"],
+        },
+    },
+    {
+        "name": "send_gmail",
+        "description": (
+            "Send an email from the user's Gmail account. "
+            "Use this when the user asks to email, send a message, or draft and send something."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to_email": {
+                    "type": "string",
+                    "description": "Recipient's email address",
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Email subject line",
+                },
+                "body_text": {
+                    "type": "string",
+                    "description": "Plain-text email body",
+                },
+            },
+            "required": ["to_email", "subject", "body_text"],
+        },
+    },
 ]
 
 

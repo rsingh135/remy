@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     # SNS Security
     SNS_SIGNING_CERT_URL_PREFIX: str = "https://sns.amazonaws.com/"
 
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/sms/auth/google/callback"
+
+    # Public base URL (used to build auth links sent via SMS)
+    BASE_URL: str = "http://localhost:8000"
+
     # App
     LOG_LEVEL: str = "INFO"
     DEV_SKIP_SNS_VERIFY: bool = False  # Set true in tests to bypass signature check

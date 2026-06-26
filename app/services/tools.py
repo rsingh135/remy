@@ -36,6 +36,12 @@ async def execute_tool(
                 return await _tool_query_schedule(inputs, user, db)
             case "store_memory":
                 return await _tool_store_memory(inputs, user, db)
+            case "get_google_auth_link":
+                return _tool_get_google_auth_link(user)
+            case "add_calendar_event":
+                return await _tool_add_calendar_event(inputs, user, db)
+            case "send_gmail":
+                return await _tool_send_gmail(inputs, user, db)
             case _:
                 return {"error": f"Unknown tool: {name}"}
     except Exception as e:
@@ -142,3 +148,59 @@ async def _tool_store_memory(inputs: dict, user: User, db: AsyncSession) -> dict
 def is_affirmative(message: str) -> bool:
     lower = message.lower().strip()
     return any(keyword in lower for keyword in _AFFIRMATIVE_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
+# Google integration tool handlers
+# ---------------------------------------------------------------------------
+
+def _tool_get_google_auth_link(user: User) -> dict:
+    """
+    Build a signed-looking auth URL and return it for inclusion in the SMS reply.
+
+    No DB or network call needed — the URL encodes the phone number as a query
+    param; the OAuth route validates it against the users table at click time.
+    The state CSRF nonce is generated there, not here.
+    """
+    from app.config import get_settings
+    s = get_settings()
+    import urllib.parse
+    link = f"{s.BASE_URL}/sms/auth/google?phone={urllib.parse.quote(user.phone_number)}"
+    return {
+        "auth_url": link,
+        "instruction": (
+            f"Tell the user: 'Tap this link to connect your Google account: {link}' "
+            "and that they can close the browser tab once connected."
+        ),
+    }
+
+
+async def _tool_add_calendar_event(
+    inputs: dict,
+    user: User,
+    db: AsyncSession,
+) -> dict:
+    from app.services.google_tools import add_calendar_event
+    return await add_calendar_event(
+        user_phone=user.phone_number,
+        summary=inputs["summary"],
+        start_time_iso=inputs["start_time_iso"],
+        end_time_iso=inputs["end_time_iso"],
+        db=db,
+        description=inputs.get("description"),
+    )
+
+
+async def _tool_send_gmail(
+    inputs: dict,
+    user: User,
+    db: AsyncSession,
+) -> dict:
+    from app.services.google_tools import send_gmail_message
+    return await send_gmail_message(
+        user_phone=user.phone_number,
+        to_email=inputs["to_email"],
+        subject=inputs["subject"],
+        body_text=inputs["body_text"],
+        db=db,
+    )
