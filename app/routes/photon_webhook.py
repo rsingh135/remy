@@ -57,21 +57,12 @@ async def photon_internal(
     if not sender_id or not message_text:
         return {"reply": None}
 
-    user, newly_created = await get_or_create_user(sender_id, db)
+    user, _ = await get_or_create_user(sender_id, db)
 
     if user.is_paused:
         return {"reply": None}
 
-    if newly_created:
-        return {
-            "reply": (
-                "hey, I'm Remy — think of me as an accountability partner in your pocket. "
-                "reminders, habit tracking, nightly check-ins, the whole thing.\n\n"
-                "what should I call you?"
-            )
-        }
-
-    if user.onboarding_step < 5:
+    if user.onboarding_step < 6:
         reply = await handle_onboarding(user, message_text, db)
     else:
         reply = await handle_main_conversation(user, message_text, db)

@@ -1,8 +1,26 @@
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+
+
+def _extract_name(text: str) -> str:
+    """Pull the name out of messages like 'Call me Ranveer' or 'I'm Ranveer Singh'."""
+    text = text.strip()
+    match = re.search(
+        r"(?:call me|i'?m|i am|name(?:'?s)? is|you can call me|just(?:\s+call\s+me)?)\s+([A-Za-z][A-Za-z '\-]{0,49})",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        name = match.group(1).strip().rstrip(".,!?")
+        return " ".join(name.split()[:2])
+    # Short message — assume it's just the name
+    if len(text.split()) <= 3:
+        return text.strip(".,!? ")
+    return text[:100]
 
 _OBJECTIVE_MAP = {
     "1": "study_buddy",
@@ -55,6 +73,20 @@ _TZ_ALIASES = {
     "cdt": "America/Chicago",
     "mdt": "America/Denver",
     "pdt": "America/Los_Angeles",
+    # common city shortcuts
+    "new york": "America/New_York",
+    "nyc": "America/New_York",
+    "chicago": "America/Chicago",
+    "denver": "America/Denver",
+    "los angeles": "America/Los_Angeles",
+    "la": "America/Los_Angeles",
+    "phoenix": "America/Phoenix",
+    "seattle": "America/Los_Angeles",
+    "miami": "America/New_York",
+    "boston": "America/New_York",
+    "dallas": "America/Chicago",
+    "houston": "America/Chicago",
+    "atlanta": "America/New_York",
 }
 
 _GOAL_PROMPTS = {
@@ -90,8 +122,17 @@ async def handle_onboarding(user: User, message: str, db: AsyncSession) -> str:
     reply = ""
 
     if step == 0:
-        user.name = message.strip()[:100]
+        # First text from user — send intro regardless of what they said
         user.onboarding_step = 1
+        reply = (
+            "hey, I'm Remy. think of me as an accountability partner in your pocket: "
+            "reminders, habit tracking, nightly check-ins, the whole thing.\n\n"
+            "what should I call you?"
+        )
+
+    elif step == 1:
+        user.name = _extract_name(message)
+        user.onboarding_step = 2
         reply = (
             f"nice {user.name}. what are we mainly working on?\n\n"
             "- study: keeping up with classes, exams, deadlines\n"
@@ -101,17 +142,17 @@ async def handle_onboarding(user: User, message: str, db: AsyncSession) -> str:
             "just text one"
         )
 
-    elif step == 1:
+    elif step == 2:
         objective = _parse_objective(message)
         if not objective:
-            return "didn't catch that — text study, habits, ideas, or hybrid"
+            return "didn't catch that. text study, habits, ideas, or hybrid"
         user.objective = objective
-        user.onboarding_step = 2
+        user.onboarding_step = 3
         reply = _GOAL_PROMPTS[objective]
 
-    elif step == 2:
+    elif step == 3:
         user.core_goal = message.strip()[:500]
-        user.onboarding_step = 3
+        user.onboarding_step = 4
         reply = (
             "ok. how do you want me to talk to you?\n\n"
             "- chill: supportive, low pressure, here for the wins\n"
@@ -120,20 +161,20 @@ async def handle_onboarding(user: User, message: str, db: AsyncSession) -> str:
             "text one"
         )
 
-    elif step == 3:
+    elif step == 4:
         persona = _parse_persona(message)
         if not persona:
             return "text chill, direct, or tough"
         user.persona_style = persona
-        user.onboarding_step = 4
-        reply = "last thing — what timezone? (EST, PST, CST, MST all work, or full like America/Chicago)"
+        user.onboarding_step = 5
+        reply = "last thing, what timezone? (EST, PST, CST, MST, or a city like Chicago, NYC, LA)"
 
-    elif step == 4:
+    elif step == 5:
         tz = _parse_timezone(message)
         if not tz:
-            return "didn't get that timezone. try EST, PST, or something like America/New_York"
+            return "didn't get that timezone. try EST, PST, or a city like Chicago or NYC"
         user.timezone = tz
-        user.onboarding_step = 5
+        user.onboarding_step = 6
 
         from app.tasks.nightly import schedule_first_nightly
         schedule_first_nightly.delay(user.phone_number)

@@ -72,9 +72,16 @@ RELEVANT MEMORIES:
 HARD RULES — FOLLOW EXACTLY:
 1. BREVITY: 1-3 sentences max. This is iMessage, not an email.
 2. TONE: Maintain the persona above. Sound like a person, not a product.
-3. NO AI FILLER: Never use "Certainly", "Of course", "Absolutely", "Great question",
-   "I'd be happy to help", "I understand", "I appreciate", "As an AI",
-   "Feel free to", "Please note", "I hope this helps", or any corporate/assistant language.
+3. NO AI FILLER — never use any of these:
+   - Filler openers: "Certainly", "Of course", "Absolutely", "Sure", "Great question",
+     "I'd be happy to", "I understand", "I appreciate", "As an AI", "Feel free to",
+     "Please note", "I hope this helps", "That being said", "Additionally",
+     "Furthermore", "Moreover", "It's worth noting", "It's important to note"
+   - Em dashes (—) — never use them, ever. Use a comma or period instead.
+   - Semicolons — people don't text with semicolons.
+   - Bullet points in regular conversation — only use them for structured choices.
+   - Exclamation marks more than once per reply.
+   - Corporate sign-offs or meta-commentary about your own response.
 4. MATCH ENERGY: Mirror how they text — casual, lowercase, abbreviations are fine.
 5. NAME: Use their name occasionally when it feels natural. Not in every message.
 6. ACADEMIC GUARDRAIL: Never solve homework, write essays, or generate code.
@@ -168,16 +175,12 @@ async def _send_reply(phone: str, message: str) -> None:
 
 
 async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> None:
-    user, newly_created = await get_or_create_user(phone, db)
+    user, _ = await get_or_create_user(phone, db)
 
     if user.is_paused:
         return
 
-    if newly_created:
-        await _send_reply(phone, "Hey! I'm Remy, your personal Life OS. What should I call you?")
-        return
-
-    if user.onboarding_step < 5:
+    if user.onboarding_step < 6:
         reply = await handle_onboarding(user, message, db)
     else:
         reply = await handle_main_conversation(user, message, db)
