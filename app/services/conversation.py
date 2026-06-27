@@ -9,7 +9,7 @@ from app.models.user import User
 from app.schemas.memory import MemoryQueryResult
 from app.services.bedrock import call_claude_with_tools
 from app.services.onboarding import handle_onboarding
-from app.services.sms_sender import send_sms
+from app.services.sms_sender import send_sms as _send_sms_aws
 from app.services.tools import execute_tool, is_affirmative
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,15 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
         r.delete(redis_key)
 
 
+async def _send_reply(phone: str, message: str) -> None:
+    from app.config import get_settings
+    if get_settings().PHOTON_ENABLED:
+        from app.services.photon_sender import send_via_photon
+        await send_via_photon(phone, message)
+    else:
+        await _send_sms_aws(phone, message)
+
+
 async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> None:
     user, newly_created = await get_or_create_user(phone, db)
 
@@ -158,7 +167,7 @@ async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> Non
         return
 
     if newly_created:
-        await send_sms(phone, "Hey! I'm Remy, your personal Life OS. What should I call you?")
+        await _send_reply(phone, "Hey! I'm Remy, your personal Life OS. What should I call you?")
         return
 
     if user.onboarding_step < 5:
@@ -166,4 +175,4 @@ async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> Non
     else:
         reply = await handle_main_conversation(user, message, db)
 
-    await send_sms(user.phone_number, reply)
+    await _send_reply(user.phone_number, reply)

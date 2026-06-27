@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.config import get_settings
 from app.database import engine
 from app.routes.google_auth import router as google_auth_router
+from app.routes.photon_webhook import router as photon_router
 from app.routes.sms import router as sms_router
 
 settings = get_settings()
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Remy — Life OS", version="1.0.0", lifespan=lifespan)
 app.include_router(sms_router, prefix="/sms", tags=["sms"])
 app.include_router(google_auth_router, prefix="/sms", tags=["google-auth"])
+app.include_router(photon_router, prefix="/sms", tags=["photon"])
 
 
 @app.get("/health")

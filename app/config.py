@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Public base URL (used to build auth links sent via SMS)
     BASE_URL: str = "http://localhost:8000"
 
+    # Photon iMessage (alternative to AWS EUM for testing; set PHOTON_ENABLED=true to activate)
+    PHOTON_ENABLED: bool = False
+    PHOTON_PROJECT_ID: str = ""
+    PHOTON_PROJECT_SECRET: str = ""
+    PHOTON_WEBHOOK_SECRET: str = ""
+
     # App
     LOG_LEVEL: str = "INFO"
     DEV_SKIP_SNS_VERIFY: bool = False  # Set true in tests to bypass signature check
