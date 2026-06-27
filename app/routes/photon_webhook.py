@@ -1,13 +1,17 @@
 """
-Photon iMessage webhook receiver.
+Photon iMessage integration routes.
 
-Photon signs each delivery with HMAC-SHA256 over the string
-  v0:{X-Spectrum-Timestamp}:{raw_body}
-and sends the hex digest in X-Spectrum-Signature as "v0=<hex>".
+Two endpoints:
 
-A 5-minute replay window guards against replayed requests.
-The space_id returned in the payload is cached in Redis so the
-outbound sender can look it up without an extra Photon API call.
+POST /photon/internal  — called by imessage_bridge.mjs (Node.js/spectrum-ts).
+    The bridge receives iMessages via the Photon SDK, posts them here, and
+    returns the reply text. The bridge then calls space.send() to deliver it.
+    No HMAC needed — this endpoint is localhost-only (bridge and FastAPI run
+    on the same machine / same VPC in production).
+
+POST /photon/webhook   — legacy HMAC-signed webhook path, kept for reference.
+    Not used when running imessage_bridge.mjs; can be removed once the bridge
+    approach is confirmed stable.
 """
 
 import hashlib
@@ -16,19 +20,62 @@ import json
 import logging
 import time
 
-import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.database import get_db
-from app.services.conversation import handle_incoming_sms
+from app.services.conversation import get_or_create_user, handle_onboarding, handle_main_conversation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_REPLAY_WINDOW_SECONDS = 300
+_REPLAY_WINDOW_SECONDS = 600
 
+
+# ---------------------------------------------------------------------------
+# Internal endpoint — used by imessage_bridge.mjs
+# ---------------------------------------------------------------------------
+
+class _InternalRequest(BaseModel):
+    sender_id: str
+    message_text: str
+
+
+@router.post("/photon/internal")
+async def photon_internal(
+    body: _InternalRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Receive a message from the Node.js iMessage bridge and return a reply.
+    The bridge calls space.send(reply) to deliver it back to the user.
+    """
+    sender_id = body.sender_id.strip()
+    message_text = body.message_text.strip()
+
+    if not sender_id or not message_text:
+        return {"reply": None}
+
+    user, newly_created = await get_or_create_user(sender_id, db)
+
+    if user.is_paused:
+        return {"reply": None}
+
+    if newly_created:
+        return {"reply": "Hey! I'm Remy, your personal Life OS. What should I call you?"}
+
+    if user.onboarding_step < 5:
+        reply = await handle_onboarding(user, message_text, db)
+    else:
+        reply = await handle_main_conversation(user, message_text, db)
+
+    return {"reply": reply}
+
+
+# ---------------------------------------------------------------------------
+# HMAC-signed webhook path (kept for reference / future use)
+# ---------------------------------------------------------------------------
 
 def _verify_photon_signature(
     raw_body: bytes,
@@ -61,6 +108,7 @@ async def photon_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    from app.config import get_settings
     raw_body = await request.body()
     s = get_settings()
 
@@ -78,8 +126,6 @@ async def photon_webhook(
         raise HTTPException(status_code=422, detail=f"Invalid JSON payload: {exc}") from exc
 
     message_obj = payload.get("message", {})
-    space_obj = payload.get("space", {})
-
     if message_obj.get("direction") != "inbound":
         return {"status": "ignored"}
 
@@ -87,17 +133,23 @@ async def photon_webhook(
     if content.get("type") != "text":
         return {"status": "ignored"}
 
-    sender_id: str | None = (message_obj.get("sender") or {}).get("id")
-    message_text: str | None = content.get("text")
-    space_id: str | None = space_obj.get("id")
+    sender_id = (message_obj.get("sender") or {}).get("id")
+    message_text = content.get("text")
 
     if not sender_id or not message_text:
-        logger.warning("Photon webhook missing sender_id or text: %s", payload)
         return {"status": "ignored"}
 
-    if space_id:
-        r = redis_lib.from_url(s.REDIS_URL, decode_responses=True)
-        r.set(f"photon_space:{sender_id}", space_id, ex=86400)
+    user, newly_created = await get_or_create_user(sender_id, db)
+    if user.is_paused:
+        return {"status": "ok"}
 
-    await handle_incoming_sms(sender_id, message_text.strip(), db)
+    if newly_created:
+        logger.info("New user via webhook: %s", sender_id)
+        return {"status": "ok"}
+
+    if user.onboarding_step < 5:
+        await handle_onboarding(user, message_text.strip(), db)
+    else:
+        await handle_main_conversation(user, message_text.strip(), db)
+
     return {"status": "ok"}
