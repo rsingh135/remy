@@ -63,7 +63,13 @@ async def photon_internal(
         return {"reply": None}
 
     if newly_created:
-        return {"reply": "Hey! I'm Remy, your personal Life OS. What should I call you?"}
+        return {
+            "reply": (
+                "hey, I'm Remy — think of me as an accountability partner in your pocket. "
+                "reminders, habit tracking, nightly check-ins, the whole thing.\n\n"
+                "what should I call you?"
+            )
+        }
 
     if user.onboarding_step < 5:
         reply = await handle_onboarding(user, message_text, db)
