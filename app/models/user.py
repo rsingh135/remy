@@ -9,6 +9,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.event import Event
+    from app.models.google_token import UserGoogleToken
     from app.models.memory import Memory
 
 
@@ -28,3 +29,6 @@ class User(Base):
 
     events: Mapped[List["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     memories: Mapped[List["Memory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    google_token: Mapped[Optional["UserGoogleToken"]] = relationship(
+        "UserGoogleToken", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )

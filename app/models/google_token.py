@@ -1,9 +1,14 @@
 import json
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class UserGoogleToken(Base):
@@ -19,6 +24,8 @@ class UserGoogleToken(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     # Stored as a JSON list; queried as-is, never filtered per-scope in SQL
     scopes = Column(Text, nullable=False)
+
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="google_token")
 
     @property
     def scopes_list(self) -> list[str]:
