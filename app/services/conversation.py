@@ -32,8 +32,53 @@ _PERSONA_INSTRUCTIONS: dict[str, str] = {
     ),
 }
 
-_NIGHTLY_REDIS_KEY = "nightly_sent:{phone}:{date}"
-_STREAK_GRACE_HOURS = 3
+_CONV_HISTORY_KEY = "conv_history:{phone}"
+_CONV_MAX_TURNS = 8   # 4 exchanges (user + assistant per exchange)
+_CONV_TTL = 43200     # 12 hours
+
+
+def _get_conv_history(phone: str, r) -> list[dict]:
+    raw = r.lrange(_CONV_HISTORY_KEY.format(phone=phone), 0, -1)
+    history = []
+    for item in raw[-_CONV_MAX_TURNS:]:
+        try:
+            history.append(json.loads(item))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return history
+
+
+def _append_conv_history(phone: str, user_msg: str, assistant_msg: str, r) -> None:
+    key = _CONV_HISTORY_KEY.format(phone=phone)
+    r.rpush(key, json.dumps({"role": "user", "content": user_msg}))
+    r.rpush(key, json.dumps({"role": "assistant", "content": assistant_msg}))
+    r.ltrim(key, -_CONV_MAX_TURNS, -1)
+    r.expire(key, _CONV_TTL)
+
+
+def _split_reply(text: str) -> list[str]:
+    """Split a response on paragraph breaks; further split long paragraphs on sentences."""
+    parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    result = []
+    for part in parts:
+        if len(part) <= 220:
+            result.append(part)
+        else:
+            sentences = part.split(". ")
+            current = ""
+            for s in sentences:
+                candidate = (current + ". " + s) if current else s
+                if len(candidate) <= 220:
+                    current = candidate
+                else:
+                    if current:
+                        result.append(current if current.endswith(".") else current + ".")
+                    current = s
+            if current:
+                result.append(current)
+
+    return result[:4] or [""]
 
 
 def build_system_prompt(user: User, memory_context: list[MemoryQueryResult]) -> str:
@@ -86,8 +131,13 @@ HARD RULES — FOLLOW EXACTLY:
 5. NAME: Use their name occasionally when it feels natural. Not in every message.
 6. ACADEMIC GUARDRAIL: Never solve homework, write essays, or generate code.
    If asked, identify the concept and respond with one Socratic question only.
-7. TOOLS: Use proactively for reminders, logs, schedules, memories.
-   Resolve relative times to absolute UTC using CURRENT UTC TIME above.
+7. TOOLS — NEVER fake it, ALWAYS call the real tool:
+   - User says "remind me" → call add_reminder. Do NOT just reply "I'll remind you."
+   - User logs workout / water / food → call log_event.
+   - User shares a personal fact (habit, goal, deadline, preference, struggle, win) → call store_memory.
+   - "connect Google" / "add to calendar" / "send email" → call the relevant Google tool.
+   Resolve ALL relative times ("tomorrow", "in 2 hours") to absolute UTC ISO strings
+   using CURRENT UTC TIME above before passing to any tool.
 """
 
 
@@ -111,17 +161,27 @@ async def get_or_create_user(phone: str, db: AsyncSession) -> tuple[User, bool]:
 
 
 async def handle_main_conversation(user: User, message: str, db: AsyncSession) -> str:
+    import redis as redis_lib
+    from app.config import get_settings
+
+    r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
+
     await _check_and_update_streak(user, message, db)
 
     memory_context = await query_memories(user.phone_number, message, db, top_k=3)
     system_prompt = build_system_prompt(user, memory_context)
-    messages = [{"role": "user", "content": message}]
+
+    history = _get_conv_history(user.phone_number, r)
+    messages = history + [{"role": "user", "content": message}]
+
+    reply_text = "I hit a snag. Give me a second and try again?"
 
     for _ in range(5):
         response = await call_claude_with_tools(messages, system_prompt)
 
         if response.get("stop_reason") == "end_turn":
-            return _extract_text_content(response)
+            reply_text = _extract_text_content(response)
+            break
 
         if response.get("stop_reason") == "tool_use":
             messages.append({"role": "assistant", "content": response["content"]})
@@ -138,9 +198,11 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
 
             messages.append({"role": "user", "content": tool_results})
         else:
-            return _extract_text_content(response)
+            reply_text = _extract_text_content(response)
+            break
 
-    return "I hit a snag. Give me a second and try again?"
+    _append_conv_history(user.phone_number, message, reply_text, r)
+    return reply_text
 
 
 async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -> None:
@@ -148,13 +210,10 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
         return
 
     import redis as redis_lib
-    from datetime import date, datetime
-    from zoneinfo import ZoneInfo
-
+    from datetime import date
     from app.config import get_settings
 
-    s = get_settings()
-    r = redis_lib.from_url(s.REDIS_URL, decode_responses=True)
+    r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
 
     today = date.today().isoformat()
     redis_key = f"nightly_sent:{user.phone_number}:{today}"

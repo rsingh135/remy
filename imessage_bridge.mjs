@@ -73,9 +73,12 @@ for await (const [space, message] of app.messages) {
     }
 
     const data = await resp.json();
-    if (data.reply) {
-      await space.send(data.reply);
-      console.log(`Replied to ${senderId}: ${data.reply}`);
+    const replies = data.replies || (data.reply ? [data.reply] : []);
+    for (const part of replies) {
+      if (!part) continue;
+      await space.send(part);
+      console.log(`Replied to ${senderId}: ${part}`);
+      if (replies.length > 1) await new Promise(r => setTimeout(r, 800));
     }
   } catch (err) {
     console.error("Bridge error:", err.message);

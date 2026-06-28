@@ -25,7 +25,12 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.conversation import get_or_create_user, handle_onboarding, handle_main_conversation
+from app.services.conversation import (
+    get_or_create_user,
+    handle_onboarding,
+    handle_main_conversation,
+    _split_reply,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -67,7 +72,7 @@ async def photon_internal(
     else:
         reply = await handle_main_conversation(user, message_text, db)
 
-    return {"reply": reply}
+    return {"replies": _split_reply(reply)}
 
 
 # ---------------------------------------------------------------------------

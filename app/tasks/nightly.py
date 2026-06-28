@@ -24,7 +24,7 @@ async def _get_users_for_nightly(now_utc: datetime) -> list[User]:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(User).where(
-                User.onboarding_step >= 5,
+                User.onboarding_step >= 6,
                 User.is_paused.is_(False),
                 User.timezone.is_not(None),
             )

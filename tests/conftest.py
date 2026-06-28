@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 # Must be set before any app imports so the lru_cached Settings picks it up
 os.environ["DEV_SKIP_SNS_VERIFY"] = "true"
+os.environ["PHOTON_ENABLED"] = "false"   # tests use the SNS webhook path
 
 import httpx
 import pytest
@@ -91,12 +92,17 @@ async def mock_send_sms(mocker):
     """
     sent = []
 
-    async def _fake(phone: str, message: str) -> None:
+    async def _fake_reply(phone: str, message: str) -> None:
         sent.append({"to": phone, "body": message})
 
-    mocker.patch("app.services.sms_sender.send_sms", side_effect=_fake)
-    mocker.patch("app.services.conversation.send_sms", side_effect=_fake)
+    mocker.patch("app.services.conversation._send_reply", side_effect=_fake_reply)
     return sent
+
+
+@pytest.fixture(autouse=True)
+def mock_celery_tasks(mocker):
+    """Prevent real Celery broker connections during tests."""
+    mocker.patch("app.tasks.nightly.schedule_first_nightly.delay")
 
 
 @pytest_asyncio.fixture
@@ -120,6 +126,16 @@ def _sync_delete(phones: list[str]) -> None:
     engine.dispose()
 
 
+def _clear_redis_history(phones: list[str]) -> None:
+    """Delete conversation history keys in Redis for the given phone numbers."""
+    if not phones:
+        return
+    import redis as redis_lib
+    r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
+    for phone in phones:
+        r.delete(f"conv_history:{phone}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def pre_clean_simulators():
     """Delete any leftover simulator rows before the session starts.
@@ -127,6 +143,7 @@ def pre_clean_simulators():
     Guards against stale data from a prior run whose async teardown failed.
     """
     _sync_delete([SIMULATOR_SUCCESS, SIMULATOR_FAILURE])
+    _clear_redis_history([SIMULATOR_SUCCESS, SIMULATOR_FAILURE])
 
 
 @pytest.fixture
@@ -135,3 +152,4 @@ def cleanup_phones():
     phones: list[str] = []
     yield phones
     _sync_delete(phones)
+    _clear_redis_history(phones)

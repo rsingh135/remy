@@ -195,7 +195,7 @@ def _invoke_model_sync(body: dict) -> dict:
 async def call_claude_with_tools(messages: list[dict], system_prompt: str) -> dict:
     body = {
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 512,
+        "max_tokens": 400,
         "system": system_prompt,
         "messages": messages,
         "tools": TOOL_DEFINITIONS,

@@ -33,13 +33,13 @@ async def _post(client, phone, message):
 
 
 async def _onboard(client, phone, name, objective_num, goal, persona_num, timezone):
-    """Fully onboard a user: greeting + 5 onboarding messages."""
-    await _post(client, phone, "hey")           # triggers greeting (newly_created)
-    await _post(client, phone, name)            # step 0 → name
-    await _post(client, phone, objective_num)   # step 1 → objective
-    await _post(client, phone, goal)            # step 2 → core_goal
-    await _post(client, phone, persona_num)     # step 3 → persona
-    await _post(client, phone, timezone)        # step 4 → timezone, onboarding_step=5
+    """Fully onboard a user: 6 messages → onboarding_step=6 (complete)."""
+    await _post(client, phone, "hey")           # step 0 → intro, step→1
+    await _post(client, phone, name)            # step 1 → name, step→2
+    await _post(client, phone, objective_num)   # step 2 → objective, step→3
+    await _post(client, phone, goal)            # step 3 → core_goal, step→4
+    await _post(client, phone, persona_num)     # step 4 → persona, step→5
+    await _post(client, phone, timezone)        # step 5 → timezone, step→6
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +96,13 @@ async def test_new_user_receives_greeting(client, mock_send_sms, cleanup_phones)
     r = await _post(client, SIMULATOR_SUCCESS, "hey")
     assert r.status_code == 200
 
-    # User row created at step 0 (no name yet)
+    # step 0 fires on first text: sends intro and advances to step 1
     async with AsyncSessionLocal() as db:
         user = (await db.execute(
             select(User).where(User.phone_number == SIMULATOR_SUCCESS)
         )).scalar_one_or_none()
     assert user is not None
-    assert user.onboarding_step == 0
+    assert user.onboarding_step == 1
     assert user.name is None
 
     assert len(mock_send_sms) == 1
@@ -118,12 +118,12 @@ async def test_full_onboarding_flow(client, mock_send_sms, cleanup_phones):
     cleanup_phones.append(SIMULATOR_SUCCESS)
 
     steps = [
-        ("hey",              "call you"),     # newly_created → greeting
-        ("Ranveer",          "mission"),      # step 0 → name accepted, asks objective
-        ("2",                "habit"),        # step 1 → habit_architect, asks goal
-        ("Work out daily",   "vibe"),         # step 2 → goal saved, asks persona
-        ("1",                "timezone"),     # step 3 → chill_coach, asks timezone
-        ("America/Chicago",  "all set"),      # step 4 → timezone saved, complete
+        ("hey",              "call you"),    # step 0 → intro asking for name
+        ("Ranveer",          "working"),     # step 1 → name stored, asks mission
+        ("2",                "habit"),       # step 2 → habit_architect, asks goal
+        ("Work out daily",   "talk"),        # step 3 → goal stored, asks persona style
+        ("1",                "timezone"),    # step 4 → chill_coach, asks timezone
+        ("America/Chicago",  "locked"),      # step 5 → timezone stored, onboarding done
     ]
 
     for message, keyword in steps:
@@ -140,7 +140,7 @@ async def test_full_onboarding_flow(client, mock_send_sms, cleanup_phones):
             select(User).where(User.phone_number == SIMULATOR_SUCCESS)
         )).scalar_one_or_none()
 
-    assert user.onboarding_step == 5
+    assert user.onboarding_step == 6
     assert user.name == "Ranveer"
     assert user.objective == "habit_architect"
     assert user.core_goal == "Work out daily"
