@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.limiter import limiter
 from app.schemas.sms import InboundSNSMessage, ParsedSMSBody
 from app.services.conversation import handle_incoming_sms
 from app.services.sns_verifier import verify_sns_signature
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/webhook", status_code=200)
+@limiter.limit("30/minute")
 async def sms_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),

@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.limiter import limiter
 from app.services.conversation import (
     get_or_create_user,
     handle_onboarding,
@@ -60,7 +61,9 @@ def _is_duplicate(sender_id: str, message_text: str) -> bool:
 
 
 @router.post("/photon/internal")
+@limiter.limit("60/minute")
 async def photon_internal(
+    request: Request,
     body: _InternalRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
