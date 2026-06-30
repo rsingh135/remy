@@ -176,8 +176,14 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
 
     reply_text = "I hit a snag. Give me a second and try again?"
 
-    for _ in range(5):
+    # Persists across all agentic turns so a second Bedrock call can't re-fire add_reminder.
+    _singleton_tools_called: set[str] = set()
+    _SINGLETON_TOOLS = {"add_reminder", "get_google_auth_link"}
+
+    for iteration in range(5):
+        logger.info("Agentic loop iter %d — calling Bedrock", iteration)
         response = await call_claude_with_tools(messages, system_prompt)
+        logger.info("Agentic loop iter %d — stop_reason=%s", iteration, response.get("stop_reason"))
 
         if response.get("stop_reason") == "end_turn":
             reply_text = _extract_text_content(response)
@@ -185,10 +191,6 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
 
         if response.get("stop_reason") == "tool_use":
             messages.append({"role": "assistant", "content": response["content"]})
-
-            # Guard against Claude emitting the same singleton tool twice in one turn.
-            _singleton_tools_called: set[str] = set()
-            _SINGLETON_TOOLS = {"add_reminder", "get_google_auth_link"}
 
             tool_results = []
             for block in response["content"]:

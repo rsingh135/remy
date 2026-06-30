@@ -54,10 +54,9 @@ def _is_duplicate(sender_id: str, message_text: str) -> bool:
     from app.config import get_settings
     key = "photon_dedup:" + hashlib.md5(f"{sender_id}:{message_text}".encode()).hexdigest()
     r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
-    if r.get(key):
-        return True
-    r.setex(key, 60, "1")  # 60 s covers Photon's own retry window (was 10 s)
-    return False
+    # Atomic SET NX — prevents race condition between concurrent webhook deliveries.
+    acquired = r.set(key, "1", nx=True, ex=60)
+    return not acquired
 
 
 @router.post("/photon/internal")
@@ -127,6 +126,9 @@ async def photon_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    # Legacy Spectrum webhook — superseded by imessage_bridge.mjs + /photon/internal.
+    # Return immediately to prevent duplicate processing when both paths are active.
+    return {"status": "ignored"}
     from app.config import get_settings
     raw_body = await request.body()
     s = get_settings()

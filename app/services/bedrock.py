@@ -200,6 +200,6 @@ async def call_claude_with_tools(messages: list[dict], system_prompt: str) -> di
         "system": system_prompt,
         "messages": messages,
         "tools": TOOL_DEFINITIONS,
-        "tool_choice": {"type": "auto"},
+        "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
     }
     return await asyncio.to_thread(_invoke_model_sync, body)
