@@ -132,7 +132,7 @@ HARD RULES — FOLLOW EXACTLY:
 6. ACADEMIC GUARDRAIL: Never solve homework, write essays, or generate code.
    If asked, identify the concept and respond with one Socratic question only.
 7. TOOLS — NEVER fake it, ALWAYS call the real tool:
-   - User says "remind me" → call add_reminder. Do NOT just reply "I'll remind you."
+   - User says "remind me" → call add_reminder EXACTLY ONCE. Never call add_reminder more than once per message, even if the phrasing is ambiguous.
    - User logs workout / water / food → call log_event.
    - User shares a personal fact (habit, goal, deadline, preference, struggle, win) → call store_memory.
    - "connect Google" / "add to calendar" / "send email" → call the relevant Google tool.
@@ -186,10 +186,21 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
         if response.get("stop_reason") == "tool_use":
             messages.append({"role": "assistant", "content": response["content"]})
 
+            # Guard against Claude emitting the same singleton tool twice in one turn.
+            _singleton_tools_called: set[str] = set()
+            _SINGLETON_TOOLS = {"add_reminder", "get_google_auth_link"}
+
             tool_results = []
             for block in response["content"]:
                 if block.get("type") == "tool_use":
-                    result = await execute_tool(block["name"], block["input"], user, db)
+                    tool_name = block["name"]
+                    if tool_name in _SINGLETON_TOOLS and tool_name in _singleton_tools_called:
+                        logger.warning("Duplicate %s call in same turn suppressed", tool_name)
+                        result = {"status": "already_scheduled"}
+                    else:
+                        if tool_name in _SINGLETON_TOOLS:
+                            _singleton_tools_called.add(tool_name)
+                        result = await execute_tool(tool_name, block["input"], user, db)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block["id"],
