@@ -9,7 +9,6 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models.user import User
-from app.services.sms_sender import _send_sms_boto3
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,13 @@ def send_nightly_commit(phone_number: str, name: str) -> None:
         return
 
     message = _NIGHTLY_MESSAGE.format(name=name)
-    _send_sms_boto3(phone_number, message)
+    s = get_settings()
+    if s.PHOTON_ENABLED:
+        from app.services.photon_sender import send_via_photon
+        asyncio.run(send_via_photon(phone_number, message))
+    else:
+        from app.services.sms_sender import _send_sms_boto3
+        _send_sms_boto3(phone_number, message)
 
     seconds_until_midnight = _seconds_until_midnight_utc()
     r.setex(redis_key, seconds_until_midnight + 3600, "1")
