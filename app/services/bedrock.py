@@ -32,15 +32,16 @@ TOOL_DEFINITIONS = [
     {
         "name": "log_event",
         "description": (
-            "Log a fitness, task, or reminder event to the database. "
-            "Use for tracking workouts, meals, todos, or completed activities."
+            "Log a fitness or task event to the database. "
+            "Use for tracking workouts, meals, or todos. "
+            "Do NOT use for reminders — use add_reminder instead."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "event_type": {
                     "type": "string",
-                    "enum": ["fitness_log", "task", "reminder"],
+                    "enum": ["fitness_log", "task"],
                     "description": "The category of event to log",
                 },
                 "data": {

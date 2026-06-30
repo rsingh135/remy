@@ -61,6 +61,18 @@ async def _tool_add_reminder(inputs: dict, user: User, db: AsyncSession) -> dict
         execution_timestamp=eta_dt,
     )
 
+    # Prevent duplicate Celery tasks if Claude calls add_reminder twice in one turn
+    existing = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "reminder")
+        .where(Event.payload["execution_timestamp"].astext == eta_dt.isoformat())
+        .where(Event.payload["message"].astext == payload.message)
+    )
+    if existing.scalar_one_or_none() is not None:
+        logger.warning("Duplicate add_reminder call suppressed for %s at %s", user.phone_number, eta_dt)
+        return {"status": "already_scheduled", "eta": eta_dt.isoformat()}
+
     task = send_reminder.apply_async(
         args=[user.phone_number, payload.message],
         eta=eta_dt,
