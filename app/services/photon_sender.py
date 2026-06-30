@@ -1,50 +1,34 @@
 """
-Outbound message sender for the Photon iMessage channel.
+Outbound iMessage sender for the Photon channel.
 
-Looks up the recipient's Photon space_id from Redis (stored at webhook receipt),
-then POSTs to the Spectrum REST API to deliver the reply.
-
-The space_id is the stable identifier for a conversation thread in Photon.
-It is cached with a 24-hour TTL that is refreshed on every inbound webhook,
-so active users will never see a stale lookup.
+Posts to the local outbound server running inside imessage_bridge.mjs (port 8001).
+The bridge holds a live spectrum-ts space per phone number and calls space.send()
+on our behalf — the only way to send proactively without a real Spectrum space UUID.
 """
 
 import logging
 
 import httpx
-import redis as redis_lib
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_SPECTRUM_BASE = "https://spectrum.photon.codes"
-
 
 async def send_via_photon(sender_id: str, message: str) -> None:
     s = get_settings()
-    r = redis_lib.from_url(s.REDIS_URL, decode_responses=True)
-    space_id = r.get(f"photon_space:{sender_id}")
+    port = getattr(s, "OUTBOUND_PORT", 8001)
+    url = f"http://127.0.0.1:{port}/send"
 
-    if not space_id:
-        logger.error(
-            "No Photon space_id cached for sender %s — cannot deliver reply", sender_id
-        )
-        return
-
-    url = f"{_SPECTRUM_BASE}/projects/{s.PHOTON_PROJECT_ID}/spaces/{space_id}/messages"
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            url,
-            json={"content": {"type": "text", "text": message[:2000]}},
-            auth=(s.PHOTON_PROJECT_ID, s.PHOTON_PROJECT_SECRET),
-        )
-        if resp.status_code >= 400:
-            logger.error(
-                "Photon send failed for space %s: %s %s",
-                space_id,
-                resp.status_code,
-                resp.text,
-            )
-        else:
-            logger.info("Photon reply delivered to space %s", space_id)
+        try:
+            resp = await client.post(url, json={"phone": sender_id, "text": message[:2000]})
+            if resp.status_code == 404:
+                logger.error(
+                    "No space cached in bridge for %s — user must text first", sender_id
+                )
+            resp.raise_for_status()
+            logger.info("Outbound delivered to %s", sender_id)
+        except httpx.ConnectError:
+            logger.error("Bridge outbound server not reachable — is imessage_bridge.mjs running?")
+            raise

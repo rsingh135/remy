@@ -47,6 +47,19 @@ class _InternalRequest(BaseModel):
     message_text: str
 
 
+def _is_duplicate(sender_id: str, message_text: str) -> bool:
+    """Return True if this (sender, text) pair was seen within the last 10 seconds."""
+    import hashlib
+    import redis as redis_lib
+    from app.config import get_settings
+    key = "photon_dedup:" + hashlib.md5(f"{sender_id}:{message_text}".encode()).hexdigest()
+    r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
+    if r.get(key):
+        return True
+    r.setex(key, 60, "1")  # 60 s covers Photon's own retry window (was 10 s)
+    return False
+
+
 @router.post("/photon/internal")
 async def photon_internal(
     body: _InternalRequest,
@@ -61,6 +74,10 @@ async def photon_internal(
 
     if not sender_id or not message_text:
         return {"reply": None}
+
+    if _is_duplicate(sender_id, message_text):
+        logger.warning("Duplicate Photon event dropped for %s: %r", sender_id, message_text[:50])
+        return {"replies": []}
 
     user, _ = await get_or_create_user(sender_id, db)
 

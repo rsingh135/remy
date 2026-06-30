@@ -19,6 +19,14 @@ def make_celery() -> Celery:
         "timezone": "UTC",
         "enable_utc": True,
         "broker_connection_retry_on_startup": True,
+        # Reliability: ack only after the task completes, requeue if the worker dies.
+        "task_acks_late": True,
+        "task_reject_on_worker_lost": True,
+        # Prevent workers from hoarding ETA tasks ahead of their scheduled time.
+        "worker_prefetch_multiplier": 1,
+        # Must exceed the longest ETA delay (24 h covers all practical reminders).
+        # Without this, Redis re-delivers ETA tasks before they are due.
+        "broker_transport_options": {"visibility_timeout": 86400},
         "beat_schedule": {
             "dispatch-nightly-commits": {
                 "task": "app.tasks.nightly.dispatch_nightly_commits",
