@@ -170,10 +170,10 @@ def _extract_text_content(response: dict) -> str:
 
 
 async def get_or_create_user(phone: str, db: AsyncSession) -> tuple[User, bool]:
-    result = await db.execute(select(User).where(User.phone_number == phone))
+    result = await db.execute(select(User).where(User.contact_id == phone))
     user = result.scalar_one_or_none()
     if user is None:
-        user = User(phone_number=phone)
+        user = User(contact_id=phone)
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -208,29 +208,29 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
     await _check_and_update_streak(user, message, db)
 
     # Hard cap: block before hitting Bedrock at all
-    current_tokens = _get_token_usage(user.phone_number, r)
+    current_tokens = _get_token_usage(user.contact_id, r)
     if current_tokens >= s.BEDROCK_DAILY_TOKEN_HARD_CAP:
-        logger.warning("User %s hit daily hard token cap (%d)", user.phone_number, current_tokens)
+        logger.warning("User %s hit daily hard token cap (%d)", user.contact_id, current_tokens)
         from app.services.alerting import send_admin_alert
         send_admin_alert(
             subject=f"[Remy] Daily token hard cap hit for user",
             message=(
-                f"User {user.phone_number} has used {current_tokens} tokens today, "
+                f"User {user.contact_id} has used {current_tokens} tokens today, "
                 f"exceeding the hard cap of {s.BEDROCK_DAILY_TOKEN_HARD_CAP}. "
                 "Bedrock calls are blocked until tomorrow."
             ),
         )
         return "I've hit my limit for today — talk to you tomorrow!"
 
-    memory_context = await query_memories(user.phone_number, message, db, top_k=3)
+    memory_context = await query_memories(user.contact_id, message, db, top_k=3)
     system_prompt = build_system_prompt(user, memory_context)
 
     # Soft cap: nudge Claude to be brief
     if current_tokens >= s.BEDROCK_DAILY_TOKEN_SOFT_CAP:
         system_prompt += "\n\nIMPORTANT: Token budget is nearly exhausted. Reply in 1 sentence only."
-        logger.info("User %s near soft token cap (%d), brevity nudge applied", user.phone_number, current_tokens)
+        logger.info("User %s near soft token cap (%d), brevity nudge applied", user.contact_id, current_tokens)
 
-    history = _get_conv_history(user.phone_number, r)
+    history = _get_conv_history(user.contact_id, r)
     messages = history + [{"role": "user", "content": message}]
 
     reply_text = "I hit a snag. Give me a second and try again?"
@@ -242,7 +242,7 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
     for iteration in range(5):
         logger.info("Agentic loop iter %d — calling Bedrock", iteration)
         response, tokens_used = await call_claude_with_tools(messages, system_prompt)
-        _increment_token_usage(user.phone_number, tokens_used, r)
+        _increment_token_usage(user.contact_id, tokens_used, r)
         logger.info(
             "Agentic loop iter %d — stop_reason=%s tokens=%d",
             iteration, response.get("stop_reason"), tokens_used,
@@ -277,7 +277,7 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
             reply_text = _extract_text_content(response)
             break
 
-    _append_conv_history(user.phone_number, message, reply_text, r)
+    _append_conv_history(user.contact_id, message, reply_text, r)
     return reply_text
 
 
@@ -299,7 +299,7 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
     r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
 
     today = date.today().isoformat()
-    redis_key = f"nightly_sent:{user.phone_number}:{today}"
+    redis_key = f"nightly_sent:{user.contact_id}:{today}"
 
     if r.exists(redis_key):
         user.streak_count += 1
@@ -308,7 +308,7 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
 
         celebration = _STREAK_MILESTONES.get(user.streak_count)
         if celebration:
-            await _send_reply(user.phone_number, celebration)
+            await _send_reply(user.contact_id, celebration)
 
 
 async def _send_reply(phone: str, message: str) -> None:
@@ -327,12 +327,12 @@ async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> Non
     if any(kw in msg_lower for kw in _PAUSE_KEYWORDS):
         user.is_paused = True
         await db.commit()
-        await _send_reply(user.phone_number, "Got it, going quiet. Text 'resume' whenever you want me back.")
+        await _send_reply(user.contact_id, "Got it, going quiet. Text 'resume' whenever you want me back.")
         return
     if any(kw in msg_lower for kw in _RESUME_KEYWORDS):
         user.is_paused = False
         await db.commit()
-        await _send_reply(user.phone_number, "I'm back. Good to hear from you.")
+        await _send_reply(user.contact_id, "I'm back. Good to hear from you.")
         return
 
     if user.is_paused:
@@ -343,4 +343,4 @@ async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> Non
     else:
         reply = await handle_main_conversation(user, message, db)
 
-    await _send_reply(user.phone_number, reply)
+    await _send_reply(user.contact_id, reply)

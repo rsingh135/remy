@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 class UserGoogleToken(Base):
     __tablename__ = "user_google_tokens"
 
-    user_phone = Column(
-        String(20),
-        ForeignKey("users.phone_number", ondelete="CASCADE"),
+    user_contact_id = Column(
+        String(255),
+        ForeignKey("users.contact_id", ondelete="CASCADE"),
         primary_key=True,
     )
     access_token = Column(Text, nullable=False)

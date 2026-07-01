@@ -46,7 +46,7 @@ async def _get_users_for_nightly(now_utc: datetime) -> list[User]:
                 if local_now.hour == 21:
                     matching.append(user)
             except (ZoneInfoNotFoundError, KeyError):
-                logger.warning("Invalid timezone for user %s: %s", user.phone_number, user.timezone)
+                logger.warning("Invalid timezone for user %s: %s", user.contact_id, user.timezone)
 
         return matching
 
@@ -57,12 +57,12 @@ def dispatch_nightly_commits() -> None:
     users = asyncio.run(_get_users_for_nightly(now_utc))
     for user in users:
         send_nightly_commit.delay(
-            user.phone_number,
+            user.contact_id,
             user.name or "friend",
             user.objective,
             user.core_goal,
         )
-        logger.info("Dispatched nightly commit for %s", user.phone_number)
+        logger.info("Dispatched nightly commit for %s", user.contact_id)
 
 
 @celery_app.task(name="app.tasks.nightly.send_nightly_commit")

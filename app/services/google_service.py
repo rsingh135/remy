@@ -77,7 +77,7 @@ def _refresh_sync(creds: Credentials) -> None:
 
 
 async def get_google_service(
-    user_phone: str,
+    contact_id: str,
     service_name: str,
     version: str,
     db: AsyncSession,
@@ -86,7 +86,7 @@ async def get_google_service(
     Return an authorised Google API service client for the given user.
 
     Args:
-        user_phone: Remy user identifier (phone number PK).
+        contact_id: Remy user identifier (contact_id PK — phone number or Apple ID email).
         service_name: Google API name, e.g. "calendar" or "gmail".
         version: API version string, e.g. "v3" or "v1".
         db: Active async SQLAlchemy session.
@@ -100,7 +100,7 @@ async def get_google_service(
         HTTPException 502 if the Google token refresh call fails.
     """
     result = await db.execute(
-        select(UserGoogleToken).where(UserGoogleToken.user_phone == user_phone)
+        select(UserGoogleToken).where(UserGoogleToken.user_contact_id == contact_id)
     )
     record = result.scalar_one_or_none()
 
@@ -127,12 +127,12 @@ async def get_google_service(
         try:
             await asyncio.to_thread(_refresh_sync, creds)
         except RefreshError as exc:
-            logger.warning("Google refresh token revoked for %s: %s", user_phone, exc)
+            logger.warning("Google refresh token revoked for %s: %s", contact_id, exc)
             raise GoogleTokenExpiredError(
                 f"Google authorization has expired for this user. They need to reconnect."
             ) from exc
         except Exception as exc:
-            logger.exception("Token refresh failed for %s", user_phone)
+            logger.exception("Token refresh failed for %s", contact_id)
             raise HTTPException(
                 status_code=502,
                 detail=f"Failed to refresh Google token: {exc}",
@@ -142,7 +142,7 @@ async def get_google_service(
         if creds.expiry:
             record.expires_at = creds.expiry.replace(tzinfo=timezone.utc)
         await db.commit()
-        logger.info("Access token refreshed for %s", user_phone)
+        logger.info("Access token refreshed for %s", contact_id)
 
     return await asyncio.to_thread(
         build,

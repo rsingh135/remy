@@ -59,7 +59,7 @@ async def store_memory(
         return None
 
     memory = Memory(
-        user_phone=phone,
+        user_contact_id=phone,
         category=category,
         memory_text=memory_text,
         embedding=embedding,
@@ -82,7 +82,7 @@ async def query_memories(
 
     stmt = (
         select(Memory.memory_text, Memory.category, Memory.created_at, distance_col)
-        .where(Memory.user_phone == phone)
+        .where(Memory.user_contact_id == phone)
         .order_by(distance_col)
         .limit(top_k)
     )

@@ -60,7 +60,7 @@ async def initiate_google_auth(
     The `phone` parameter is embedded in the link Remy sends via SMS, e.g.:
         https://remy.rs1ngh.com/sms/auth/google?phone=%2B14254147755
     """
-    result = await db.execute(select(User).where(User.phone_number == phone))
+    result = await db.execute(select(User).where(User.contact_id == phone))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -135,12 +135,12 @@ async def google_auth_callback(
     )
 
     result = await db.execute(
-        select(UserGoogleToken).where(UserGoogleToken.user_phone == phone)
+        select(UserGoogleToken).where(UserGoogleToken.user_contact_id == phone)
     )
     record = result.scalar_one_or_none()
 
     if record is None:
-        record = UserGoogleToken(user_phone=phone)
+        record = UserGoogleToken(user_contact_id=phone)
         db.add(record)
 
     record.access_token = creds.token

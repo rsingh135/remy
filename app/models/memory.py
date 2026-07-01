@@ -18,8 +18,8 @@ class Memory(Base):
     __tablename__ = "memories"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_phone: Mapped[str] = mapped_column(
-        String(20), ForeignKey("users.phone_number", ondelete="CASCADE"), nullable=False
+    user_contact_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.contact_id", ondelete="CASCADE"), nullable=False
     )
     category: Mapped[str] = mapped_column(String(20), nullable=False)
     memory_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -30,4 +30,4 @@ class Memory(Base):
 
     user: Mapped["User"] = relationship(back_populates="memories")
 
-    __table_args__ = (Index("ix_memories_category_user", "category", "user_phone"),)
+    __table_args__ = (Index("ix_memories_category_user", "category", "user_contact_id"),)

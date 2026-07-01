@@ -67,7 +67,7 @@ async def execute_tool(
             case _:
                 return {"error": f"Unknown tool: {name}"}
     except GoogleTokenExpiredError:
-        logger.warning("Google token expired for %s during tool %s", user.phone_number, name)
+        logger.warning("Google token expired for %s during tool %s", user.contact_id, name)
         auth_info = _tool_get_google_auth_link(user)
         return {
             "error": "Google authorization expired.",
@@ -96,17 +96,17 @@ async def _tool_add_reminder(inputs: dict, user: User, db: AsyncSession) -> dict
     # Prevent duplicate Celery tasks if Claude calls add_reminder twice in one turn
     existing = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "reminder")
         .where(Event.payload["execution_timestamp"].astext == eta_dt.isoformat())
         .where(Event.payload["message"].astext == payload.message)
     )
     if existing.scalar_one_or_none() is not None:
-        logger.warning("Duplicate add_reminder call suppressed for %s at %s", user.phone_number, eta_dt)
+        logger.warning("Duplicate add_reminder call suppressed for %s at %s", user.contact_id, eta_dt)
         return {"status": "already_scheduled", "eta": eta_dt.isoformat()}
 
     task = send_reminder.apply_async(
-        args=[user.phone_number, payload.message],
+        args=[user.contact_id, payload.message],
         eta=eta_dt,
     )
 
@@ -114,7 +114,7 @@ async def _tool_add_reminder(inputs: dict, user: User, db: AsyncSession) -> dict
     payload_dict["task_id"] = task.id
 
     event = Event(
-        user_phone=user.phone_number,
+        user_contact_id=user.contact_id,
         event_type="reminder",
         payload=payload_dict,
     )
@@ -135,7 +135,7 @@ async def _tool_log_event(inputs: dict, user: User, db: AsyncSession) -> dict:
     validated = schema_cls(**data)
 
     event = Event(
-        user_phone=user.phone_number,
+        user_contact_id=user.contact_id,
         event_type=event_type,
         payload=validated.model_dump(mode="json"),
     )
@@ -158,7 +158,7 @@ async def _tool_query_schedule(inputs: dict, user: User, db: AsyncSession) -> di
     # Non-reminder events: filtered by creation timestamp
     result_other = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type != "reminder")
         .where(Event.timestamp >= start)
         .where(Event.timestamp <= end)
@@ -170,7 +170,7 @@ async def _tool_query_schedule(inputs: dict, user: User, db: AsyncSession) -> di
     execution_ts = cast(Event.payload["execution_timestamp"].astext, SADateTime(timezone=True))
     result_reminders = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "reminder")
         .where(execution_ts >= start)
         .where(execution_ts <= end)
@@ -201,7 +201,7 @@ async def _tool_store_memory(inputs: dict, user: User, db: AsyncSession) -> dict
     if category not in valid_categories:
         return {"error": f"Invalid category: {category}. Must be one of {valid_categories}"}
 
-    await store_memory(user.phone_number, category, memory_text, db)
+    await store_memory(user.contact_id, category, memory_text, db)
     return {"status": "stored", "category": category}
 
 
@@ -210,7 +210,7 @@ async def _tool_list_reminders(user: User, db: AsyncSession) -> dict:
     execution_ts = cast(Event.payload["execution_timestamp"].astext, SADateTime(timezone=True))
     result = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "reminder")
         .where(execution_ts > now_utc)
         .order_by(execution_ts)
@@ -235,7 +235,7 @@ async def _tool_cancel_reminder(inputs: dict, user: User, db: AsyncSession) -> d
     task_id = inputs["task_id"]
     result = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "reminder")
         .where(Event.payload["task_id"].astext == task_id)
     )
@@ -252,7 +252,7 @@ async def _tool_cancel_reminder(inputs: dict, user: User, db: AsyncSession) -> d
 async def _tool_recall_memories(user: User, db: AsyncSession) -> dict:
     result = await db.execute(
         select(Memory)
-        .where(Memory.user_phone == user.phone_number)
+        .where(Memory.user_contact_id == user.contact_id)
         .order_by(Memory.created_at.desc())
         .limit(30)
     )
@@ -274,7 +274,7 @@ async def _tool_list_tasks(inputs: dict, user: User, db: AsyncSession) -> dict:
     status_filter = inputs.get("status")
     stmt = (
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "task")
         .order_by(Event.timestamp.desc())
     )
@@ -308,7 +308,7 @@ async def _tool_update_task(inputs: dict, user: User, db: AsyncSession) -> dict:
     event_id = inputs["event_id"]
     result = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "task")
         .where(Event.id == event_id)
     )
@@ -351,7 +351,7 @@ async def _tool_query_fitness_summary(inputs: dict, user: User, db: AsyncSession
 
     result = await db.execute(
         select(Event)
-        .where(Event.user_phone == user.phone_number)
+        .where(Event.user_contact_id == user.contact_id)
         .where(Event.event_type == "fitness_log")
         .where(Event.timestamp >= start)
         .order_by(Event.timestamp)
@@ -419,7 +419,7 @@ def _tool_get_google_auth_link(user: User) -> dict:
     from app.config import get_settings
     s = get_settings()
     import urllib.parse
-    link = f"{s.BASE_URL}/sms/auth/google?phone={urllib.parse.quote(user.phone_number)}"
+    link = f"{s.BASE_URL}/sms/auth/google?phone={urllib.parse.quote(user.contact_id)}"
     return {
         "auth_url": link,
         "instruction": (
@@ -436,7 +436,7 @@ async def _tool_add_calendar_event(
 ) -> dict:
     from app.services.google_tools import add_calendar_event
     return await add_calendar_event(
-        user_phone=user.phone_number,
+        contact_id=user.contact_id,
         summary=inputs["summary"],
         start_time_iso=inputs["start_time_iso"],
         end_time_iso=inputs["end_time_iso"],
@@ -452,7 +452,7 @@ async def _tool_list_calendar_events(
 ) -> dict:
     from app.services.google_tools import list_calendar_events
     return await list_calendar_events(
-        user_phone=user.phone_number,
+        contact_id=user.contact_id,
         time_min_iso=inputs["time_min_iso"],
         time_max_iso=inputs["time_max_iso"],
         db=db,
@@ -467,7 +467,7 @@ async def _tool_send_gmail(
 ) -> dict:
     from app.services.google_tools import send_gmail_message
     return await send_gmail_message(
-        user_phone=user.phone_number,
+        contact_id=user.contact_id,
         to_email=inputs["to_email"],
         subject=inputs["subject"],
         body_text=inputs["body_text"],
@@ -491,7 +491,7 @@ async def _tool_read_gmail(
     from app.services.google_tools import read_gmail_messages
     max_results = int(inputs.get("max_results") or 5)
     return await read_gmail_messages(
-        user_phone=user.phone_number,
+        contact_id=user.contact_id,
         db=db,
         max_results=max_results,
     )

@@ -178,9 +178,9 @@ async def handle_onboarding(user: User, message: str, db: AsyncSession) -> str:
 
         from datetime import datetime, timezone, timedelta
         from app.tasks.nightly import schedule_first_nightly, send_onboarding_followup
-        schedule_first_nightly.delay(user.phone_number)
+        schedule_first_nightly.delay(user.contact_id)
         send_onboarding_followup.apply_async(
-            args=[user.phone_number, user.name or "friend", user.objective],
+            args=[user.contact_id, user.name or "friend", user.objective],
             eta=datetime.now(timezone.utc) + timedelta(hours=24),
         )
 

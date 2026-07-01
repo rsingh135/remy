@@ -16,8 +16,8 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_phone: Mapped[str] = mapped_column(
-        String(20), ForeignKey("users.phone_number", ondelete="CASCADE"), nullable=False
+    user_contact_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.contact_id", ondelete="CASCADE"), nullable=False
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -27,4 +27,4 @@ class Event(Base):
 
     user: Mapped["User"] = relationship(back_populates="events")
 
-    __table_args__ = (Index("ix_events_user_phone_timestamp", "user_phone", "timestamp"),)
+    __table_args__ = (Index("ix_events_user_contact_id_timestamp", "user_contact_id", "timestamp"),)

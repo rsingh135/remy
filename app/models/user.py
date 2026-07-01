@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class User(Base):
     __tablename__ = "users"
 
-    phone_number: Mapped[str] = mapped_column(String(20), primary_key=True)
+    contact_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[Optional[str]] = mapped_column(String(100))
     timezone: Mapped[Optional[str]] = mapped_column(String(50))
     persona_style: Mapped[Optional[str]] = mapped_column(String(30))

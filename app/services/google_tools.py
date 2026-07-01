@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 async def add_calendar_event(
-    user_phone: str,
+    contact_id: str,
     summary: str,
     start_time_iso: str,
     end_time_iso: str,
@@ -46,7 +46,7 @@ async def add_calendar_event(
     Insert an event on the user's primary Google Calendar.
 
     Args:
-        user_phone: Remy user identifier.
+        contact_id: Remy user identifier (contact_id PK).
         summary: Event title displayed on the calendar.
         start_time_iso: ISO 8601 datetime with timezone offset, e.g. '2026-07-01T09:00:00-05:00'.
         end_time_iso: ISO 8601 datetime with timezone offset for event end.
@@ -56,7 +56,7 @@ async def add_calendar_event(
     Returns:
         {"event_id": str, "link": str} — the created event's ID and calendar link.
     """
-    service = await get_google_service(user_phone, "calendar", "v3", db)
+    service = await get_google_service(contact_id, "calendar", "v3", db)
 
     body: dict = {
         "summary": summary,
@@ -73,23 +73,23 @@ async def add_calendar_event(
             .execute()
         )
     except HttpError as exc:
-        logger.exception("Calendar insert failed for %s", user_phone)
+        logger.exception("Calendar insert failed for %s", contact_id)
         raise HTTPException(
             status_code=502, detail=f"Google Calendar error: {exc}"
         ) from exc
 
-    logger.info("Calendar event created for %s: %s", user_phone, created.get("id"))
+    logger.info("Calendar event created for %s: %s", contact_id, created.get("id"))
     return {"event_id": created["id"], "link": created.get("htmlLink", "")}
 
 
 async def list_calendar_events(
-    user_phone: str,
+    contact_id: str,
     time_min_iso: str,
     time_max_iso: str,
     db: AsyncSession,
     max_results: int = 10,
 ) -> dict:
-    service = await get_google_service(user_phone, "calendar", "v3", db)
+    service = await get_google_service(contact_id, "calendar", "v3", db)
 
     try:
         result = await asyncio.to_thread(
@@ -105,7 +105,7 @@ async def list_calendar_events(
             .execute()
         )
     except HttpError as exc:
-        logger.exception("Calendar list failed for %s", user_phone)
+        logger.exception("Calendar list failed for %s", contact_id)
         raise HTTPException(
             status_code=502, detail=f"Google Calendar error: {exc}"
         ) from exc
@@ -127,7 +127,7 @@ async def list_calendar_events(
 
 
 async def send_gmail_message(
-    user_phone: str,
+    contact_id: str,
     to_email: str,
     subject: str,
     body_text: str,
@@ -137,7 +137,7 @@ async def send_gmail_message(
     Send a plain-text email from the user's Gmail account.
 
     Args:
-        user_phone: Remy user identifier.
+        contact_id: Remy user identifier (contact_id PK).
         to_email: Recipient email address.
         subject: Email subject line.
         body_text: Plain-text body (UTF-8).
@@ -146,7 +146,7 @@ async def send_gmail_message(
     Returns:
         {"message_id": str, "thread_id": str} — the sent message's Gmail IDs.
     """
-    service = await get_google_service(user_phone, "gmail", "v1", db)
+    service = await get_google_service(contact_id, "gmail", "v1", db)
 
     mime_msg = MIMEText(body_text, "plain", "utf-8")
     mime_msg["to"] = to_email
@@ -161,17 +161,17 @@ async def send_gmail_message(
             .execute()
         )
     except HttpError as exc:
-        logger.exception("Gmail send failed for %s → %s", user_phone, to_email)
+        logger.exception("Gmail send failed for %s → %s", contact_id, to_email)
         raise HTTPException(
             status_code=502, detail=f"Gmail error: {exc}"
         ) from exc
 
-    logger.info("Gmail sent for %s → %s", user_phone, to_email)
+    logger.info("Gmail sent for %s → %s", contact_id, to_email)
     return {"message_id": sent["id"], "thread_id": sent.get("threadId", "")}
 
 
 async def read_gmail_messages(
-    user_phone: str,
+    contact_id: str,
     db: AsyncSession,
     max_results: int = 5,
 ) -> dict:
@@ -182,7 +182,7 @@ async def read_gmail_messages(
     max_results is capped at 10 to stay within SMS reply size limits.
     """
     max_results = min(max_results, 10)
-    service = await get_google_service(user_phone, "gmail", "v1", db)
+    service = await get_google_service(contact_id, "gmail", "v1", db)
 
     try:
         list_result = await asyncio.to_thread(
@@ -192,7 +192,7 @@ async def read_gmail_messages(
             .execute()
         )
     except HttpError as exc:
-        logger.exception("Gmail list failed for %s", user_phone)
+        logger.exception("Gmail list failed for %s", contact_id)
         raise HTTPException(status_code=502, detail=f"Gmail error: {exc}") from exc
 
     messages = list_result.get("messages", [])
@@ -217,7 +217,7 @@ async def read_gmail_messages(
                 "snippet": detail.get("snippet", ""),
             })
         except HttpError:
-            logger.warning("Could not fetch Gmail message %s for %s", msg["id"], user_phone)
+            logger.warning("Could not fetch Gmail message %s for %s", msg["id"], contact_id)
 
-    logger.info("Gmail inbox fetched for %s: %d messages", user_phone, len(emails))
+    logger.info("Gmail inbox fetched for %s: %d messages", contact_id, len(emails))
     return {"emails": emails, "count": len(emails)}
