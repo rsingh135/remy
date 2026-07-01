@@ -176,8 +176,13 @@ async def handle_onboarding(user: User, message: str, db: AsyncSession) -> str:
         user.timezone = tz
         user.onboarding_step = 6
 
-        from app.tasks.nightly import schedule_first_nightly
+        from datetime import datetime, timezone, timedelta
+        from app.tasks.nightly import schedule_first_nightly, send_onboarding_followup
         schedule_first_nightly.delay(user.phone_number)
+        send_onboarding_followup.apply_async(
+            args=[user.phone_number, user.name or "friend", user.objective],
+            eta=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
 
         reply = (
             f"locked in. I'll check in at 9pm your time every night.\n\n"

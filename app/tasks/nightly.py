@@ -102,6 +102,30 @@ def schedule_first_nightly(phone_number: str) -> None:
     logger.info("User %s onboarded, nightly commits enabled via Beat schedule", phone_number)
 
 
+_FOLLOWUP_MESSAGES: dict[str, str] = {
+    "study_buddy": "hey {name}, day 1 check-in — any studying happen today?",
+    "habit_architect": "hey {name}, how'd day 1 go? any habits locked in?",
+    "idea_vault": "hey {name}, capture anything worth keeping on day 1?",
+    "hybrid": "hey {name}, day 1 in the books — how'd it go?",
+}
+
+
+@celery_app.task(name="app.tasks.nightly.send_onboarding_followup")
+def send_onboarding_followup(phone_number: str, name: str, objective: str | None = None) -> None:
+    template = _FOLLOWUP_MESSAGES.get(objective or "", "hey {name}, how's day 1 going so far?")
+    message = template.format(name=name)
+
+    s = get_settings()
+    if s.PHOTON_ENABLED:
+        from app.services.photon_sender import send_via_photon
+        asyncio.run(send_via_photon(phone_number, message))
+    else:
+        from app.services.sms_sender import _send_sms_boto3
+        _send_sms_boto3(phone_number, message)
+
+    logger.info("Onboarding follow-up sent to %s", phone_number)
+
+
 def _seconds_until_midnight_utc() -> int:
     now = datetime.now(tz=ZoneInfo("UTC"))
     midnight = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=ZoneInfo("UTC"))

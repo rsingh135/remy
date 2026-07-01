@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,8 +37,8 @@ _PAUSE_KEYWORDS = {"pause", "stop", "unsubscribe"}
 _RESUME_KEYWORDS = {"resume", "start", "unstop"}
 
 _CONV_HISTORY_KEY = "conv_history:{phone}"
-_CONV_MAX_TURNS = 8   # 4 exchanges (user + assistant per exchange)
-_CONV_TTL = 43200     # 12 hours
+_CONV_MAX_TURNS = 6   # 3 exchanges (user + assistant per exchange)
+_CONV_TTL = 86400     # 24 hours
 
 
 def _get_conv_history(phone: str, r) -> list[dict]:
@@ -60,23 +61,28 @@ def _append_conv_history(phone: str, user_msg: str, assistant_msg: str, r) -> No
 
 
 def _split_reply(text: str) -> list[str]:
-    """Split a response on paragraph breaks; further split long paragraphs on sentences."""
-    parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+    # Paragraph breaks → separate messages; single newlines within a paragraph → also breaks
+    chunks: list[str] = []
+    for para in text.split("\n\n"):
+        for line in para.split("\n"):
+            line = line.strip()
+            if line:
+                chunks.append(line)
 
-    result = []
-    for part in parts:
-        if len(part) <= 220:
-            result.append(part)
+    result: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= 220:
+            result.append(chunk)
         else:
-            sentences = part.split(". ")
+            sentences = re.split(r'(?<=[.!?])\s+', chunk)
             current = ""
             for s in sentences:
-                candidate = (current + ". " + s) if current else s
+                candidate = (current + " " + s) if current else s
                 if len(candidate) <= 220:
                     current = candidate
                 else:
                     if current:
-                        result.append(current if current.endswith(".") else current + ".")
+                        result.append(current)
                     current = s
             if current:
                 result.append(current)
