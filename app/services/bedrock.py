@@ -165,6 +165,47 @@ TOOL_DEFINITIONS = [
             "required": ["to_email", "subject", "body_text"],
         },
     },
+    {
+        "name": "list_reminders",
+        "description": (
+            "List all pending (not yet fired) reminders for the user. "
+            "Use when the user asks to see their reminders, what's scheduled, or before cancelling one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "cancel_reminder",
+        "description": (
+            "Cancel a scheduled reminder by its task_id. "
+            "Call list_reminders first to get the task_id, then call this to cancel the specific one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The Celery task_id of the reminder to cancel (from list_reminders)",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "recall_memories",
+        "description": (
+            "Retrieve all long-term memories stored about the user. "
+            "Use when the user asks what you remember about them or wants a summary of their stored facts."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 

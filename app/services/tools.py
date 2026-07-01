@@ -1,13 +1,15 @@
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import DateTime as SADateTime
+from sqlalchemy import cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.vector_store import store_memory
 from app.models.event import Event
+from app.models.memory import Memory
 from app.models.user import User
 from app.schemas.payloads import PAYLOAD_SCHEMA_MAP, ReminderPayload
 
@@ -34,8 +36,14 @@ async def execute_tool(
                 return await _tool_log_event(inputs, user, db)
             case "query_schedule":
                 return await _tool_query_schedule(inputs, user, db)
+            case "list_reminders":
+                return await _tool_list_reminders(user, db)
+            case "cancel_reminder":
+                return await _tool_cancel_reminder(inputs, user, db)
             case "store_memory":
                 return await _tool_store_memory(inputs, user, db)
+            case "recall_memories":
+                return await _tool_recall_memories(user, db)
             case "get_google_auth_link":
                 return _tool_get_google_auth_link(user)
             case "add_calendar_event":
@@ -123,14 +131,30 @@ async def _tool_query_schedule(inputs: dict, user: User, db: AsyncSession) -> di
     start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=ZoneInfo("UTC"))
     end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59, tzinfo=ZoneInfo("UTC"))
 
-    result = await db.execute(
+    # Non-reminder events: filtered by creation timestamp
+    result_other = await db.execute(
         select(Event)
         .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type != "reminder")
         .where(Event.timestamp >= start)
         .where(Event.timestamp <= end)
         .order_by(Event.timestamp)
     )
-    events = result.scalars().all()
+
+    # Reminder events: filtered by scheduled execution_timestamp so "what's today?" surfaces
+    # reminders *for* today regardless of when they were created.
+    execution_ts = cast(Event.payload["execution_timestamp"].astext, SADateTime(timezone=True))
+    result_reminders = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "reminder")
+        .where(execution_ts >= start)
+        .where(execution_ts <= end)
+        .order_by(execution_ts)
+    )
+
+    events = list(result_other.scalars().all()) + list(result_reminders.scalars().all())
+    events.sort(key=lambda e: e.timestamp)
 
     return {
         "date": date_str,
@@ -155,6 +179,71 @@ async def _tool_store_memory(inputs: dict, user: User, db: AsyncSession) -> dict
 
     await store_memory(user.phone_number, category, memory_text, db)
     return {"status": "stored", "category": category}
+
+
+async def _tool_list_reminders(user: User, db: AsyncSession) -> dict:
+    now_utc = datetime.now(tz=timezone.utc)
+    execution_ts = cast(Event.payload["execution_timestamp"].astext, SADateTime(timezone=True))
+    result = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "reminder")
+        .where(execution_ts > now_utc)
+        .order_by(execution_ts)
+    )
+    events = result.scalars().all()
+    return {
+        "pending_reminders": [
+            {
+                "task_id": e.payload.get("task_id"),
+                "message": e.payload.get("message"),
+                "eta": e.payload.get("execution_timestamp"),
+            }
+            for e in events
+        ],
+        "count": len(events),
+    }
+
+
+async def _tool_cancel_reminder(inputs: dict, user: User, db: AsyncSession) -> dict:
+    from app.tasks.celery_app import celery_app
+
+    task_id = inputs["task_id"]
+    result = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "reminder")
+        .where(Event.payload["task_id"].astext == task_id)
+    )
+    event = result.scalar_one_or_none()
+    if event is None:
+        return {"error": "Reminder not found"}
+
+    celery_app.control.revoke(task_id, terminate=True)
+    await db.delete(event)
+    await db.commit()
+    return {"status": "cancelled", "task_id": task_id}
+
+
+async def _tool_recall_memories(user: User, db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(Memory)
+        .where(Memory.user_phone == user.phone_number)
+        .order_by(Memory.created_at.desc())
+        .limit(30)
+    )
+    memories = result.scalars().all()
+    return {
+        "memories": [
+            {
+                "category": m.category,
+                "text": m.memory_text,
+                "stored_at": m.created_at.isoformat(),
+            }
+            for m in memories
+        ],
+        "total": len(memories),
+    }
 
 
 def is_affirmative(message: str) -> bool:

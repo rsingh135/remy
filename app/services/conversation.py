@@ -32,6 +32,9 @@ _PERSONA_INSTRUCTIONS: dict[str, str] = {
     ),
 }
 
+_PAUSE_KEYWORDS = {"pause", "stop", "unsubscribe"}
+_RESUME_KEYWORDS = {"resume", "start", "unstop"}
+
 _CONV_HISTORY_KEY = "conv_history:{phone}"
 _CONV_MAX_TURNS = 8   # 4 exchanges (user + assistant per exchange)
 _CONV_TTL = 43200     # 12 hours
@@ -107,7 +110,7 @@ USER PROFILE:
 - Name: {user.name}
 - Objective: {objective_labels.get(user.objective or '', 'Not set')}
 - Core Goal: {user.core_goal or 'Not set'}
-- Current Streak: {user.streak_count} days
+- Current Streak: {user.streak_count} days (increments each day they confirm hitting their goal after the nightly check-in)
 
 CURRENT UTC TIME: {now_utc}
 
@@ -133,6 +136,11 @@ HARD RULES — FOLLOW EXACTLY:
    If asked, identify the concept and respond with one Socratic question only.
 7. TOOLS — NEVER fake it, ALWAYS call the real tool:
    - User says "remind me" → call add_reminder EXACTLY ONCE. Never call add_reminder more than once per message, even if the phrasing is ambiguous.
+   - User asks about their day / schedule / what's on / what they have → call query_schedule with today's date.
+   - User wants to see their reminders / what's scheduled → call list_reminders.
+   - User wants to cancel a reminder → call list_reminders first to identify it, then call cancel_reminder with the task_id.
+   - User asks what you remember about them → call recall_memories and summarize the results.
+   - User asks about their streak → answer directly from USER PROFILE above. Do not call a tool.
    - User logs workout / water / food → call log_event.
    - User shares a personal fact (habit, goal, deadline, preference, struggle, win) → call store_memory.
    - "connect Google" / "add to calendar" / "send email" → call the relevant Google tool.
@@ -248,6 +256,18 @@ async def _send_reply(phone: str, message: str) -> None:
 
 async def handle_incoming_sms(phone: str, message: str, db: AsyncSession) -> None:
     user, _ = await get_or_create_user(phone, db)
+
+    msg_lower = message.lower().strip()
+    if any(kw in msg_lower for kw in _PAUSE_KEYWORDS):
+        user.is_paused = True
+        await db.commit()
+        await _send_reply(user.phone_number, "Got it, going quiet. Text 'resume' whenever you want me back.")
+        return
+    if any(kw in msg_lower for kw in _RESUME_KEYWORDS):
+        user.is_paused = False
+        await db.commit()
+        await _send_reply(user.phone_number, "I'm back. Good to hear from you.")
+        return
 
     if user.is_paused:
         return
