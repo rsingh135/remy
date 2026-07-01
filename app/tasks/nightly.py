@@ -84,12 +84,20 @@ def send_nightly_commit(
 
     message = _build_nightly_message(name, objective, core_goal)
     s = get_settings()
-    if s.PHOTON_ENABLED:
-        from app.services.photon_sender import send_via_photon
-        asyncio.run(send_via_photon(phone_number, message))
-    else:
-        from app.services.sms_sender import _send_sms_boto3
-        _send_sms_boto3(phone_number, message)
+    try:
+        if s.PHOTON_ENABLED:
+            from app.services.photon_sender import send_via_photon
+            asyncio.run(send_via_photon(phone_number, message))
+        else:
+            from app.services.sms_sender import _send_sms_boto3
+            _send_sms_boto3(phone_number, message)
+    except Exception as exc:
+        from app.services.alerting import send_admin_alert
+        send_admin_alert(
+            subject="[Remy] Nightly check-in delivery failed",
+            message=f"send_nightly_commit failed for user {phone_number}. Error: {exc}",
+        )
+        raise
 
     seconds_until_midnight = _seconds_until_midnight_utc()
     r.setex(redis_key, seconds_until_midnight + 3600, "1")

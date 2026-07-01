@@ -25,6 +25,7 @@ class User(Base):
     onboarding_step: Mapped[int] = mapped_column(Integer, default=0)
     streak_count: Mapped[int] = mapped_column(Integer, default=0)
     is_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    gmail_read_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     events: Mapped[List["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")

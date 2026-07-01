@@ -28,6 +28,8 @@ async def execute_tool(
     user: User,
     db: AsyncSession,
 ) -> dict:
+    from app.services.google_service import GoogleTokenExpiredError
+
     try:
         match name:
             case "add_reminder":
@@ -60,8 +62,20 @@ async def execute_tool(
                 return await _tool_list_calendar_events(inputs, user, db)
             case "send_gmail":
                 return await _tool_send_gmail(inputs, user, db)
+            case "read_gmail":
+                return await _tool_read_gmail(inputs, user, db)
             case _:
                 return {"error": f"Unknown tool: {name}"}
+    except GoogleTokenExpiredError:
+        logger.warning("Google token expired for %s during tool %s", user.phone_number, name)
+        auth_info = _tool_get_google_auth_link(user)
+        return {
+            "error": "Google authorization expired.",
+            "action": (
+                f"Tell the user their Google connection has expired and they need to reconnect. "
+                f"Send them this link: {auth_info['auth_url']}"
+            ),
+        }
     except Exception as e:
         logger.error("Tool %s failed: %s", name, e)
         return {"error": str(e)}
@@ -376,8 +390,10 @@ async def _tool_update_profile(inputs: dict, user: User, db: AsyncSession) -> di
         if value not in _VALID_OBJECTIVES:
             return {"error": f"Invalid objective '{value}'. Choose from: {sorted(_VALID_OBJECTIVES)}"}
         user.objective = value
+    elif field == "gmail_read_enabled":
+        user.gmail_read_enabled = value.lower() in ("true", "1", "yes", "on")
     else:
-        return {"error": f"Cannot update '{field}'. Allowed fields: persona_style, core_goal, objective"}
+        return {"error": f"Cannot update '{field}'. Allowed fields: persona_style, core_goal, objective, gmail_read_enabled"}
 
     await db.commit()
     return {"status": "updated", "field": field, "value": value}
@@ -456,4 +472,26 @@ async def _tool_send_gmail(
         subject=inputs["subject"],
         body_text=inputs["body_text"],
         db=db,
+    )
+
+
+async def _tool_read_gmail(
+    inputs: dict,
+    user: User,
+    db: AsyncSession,
+) -> dict:
+    if not user.gmail_read_enabled:
+        return {
+            "error": "Gmail reading is not enabled for this user.",
+            "hint": (
+                "Tell the user: 'Gmail reading is off by default. "
+                "Say \"enable Gmail reading\" and I'll turn it on for you.'"
+            ),
+        }
+    from app.services.google_tools import read_gmail_messages
+    max_results = int(inputs.get("max_results") or 5)
+    return await read_gmail_messages(
+        user_phone=user.phone_number,
+        db=db,
+        max_results=max_results,
     )

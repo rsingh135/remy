@@ -155,6 +155,8 @@ HARD RULES — FOLLOW EXACTLY:
    - User asks what's on their calendar / what's coming up → call list_calendar_events with appropriate ISO datetime range.
    - User shares a personal fact (habit, goal, deadline, preference, struggle, win) → call store_memory.
    - "connect Google" / "add to calendar" / "send email" → call the relevant Google tool.
+   - User asks to check email / read inbox → call read_gmail.
+   - User says "enable Gmail reading" or "disable Gmail reading" → call update_profile with field="gmail_read_enabled" and value="true" or "false".
    Resolve ALL relative times ("tomorrow", "in 2 hours") to absolute UTC ISO strings
    using CURRENT UTC TIME above before passing to any tool.
 """
@@ -179,16 +181,54 @@ async def get_or_create_user(phone: str, db: AsyncSession) -> tuple[User, bool]:
     return user, False
 
 
+def _token_budget_key(phone: str) -> str:
+    from datetime import date
+    return f"bedrock_tokens:{phone}:{date.today().isoformat()}"
+
+
+def _get_token_usage(phone: str, r) -> int:
+    val = r.get(_token_budget_key(phone))
+    return int(val) if val else 0
+
+
+def _increment_token_usage(phone: str, tokens: int, r) -> int:
+    key = _token_budget_key(phone)
+    new_total = r.incrby(key, tokens)
+    r.expire(key, 90000)  # 25h TTL — covers across midnight safely
+    return new_total
+
+
 async def handle_main_conversation(user: User, message: str, db: AsyncSession) -> str:
     import redis as redis_lib
     from app.config import get_settings
 
-    r = redis_lib.from_url(get_settings().REDIS_URL, decode_responses=True)
+    s = get_settings()
+    r = redis_lib.from_url(s.REDIS_URL, decode_responses=True)
 
     await _check_and_update_streak(user, message, db)
 
+    # Hard cap: block before hitting Bedrock at all
+    current_tokens = _get_token_usage(user.phone_number, r)
+    if current_tokens >= s.BEDROCK_DAILY_TOKEN_HARD_CAP:
+        logger.warning("User %s hit daily hard token cap (%d)", user.phone_number, current_tokens)
+        from app.services.alerting import send_admin_alert
+        send_admin_alert(
+            subject=f"[Remy] Daily token hard cap hit for user",
+            message=(
+                f"User {user.phone_number} has used {current_tokens} tokens today, "
+                f"exceeding the hard cap of {s.BEDROCK_DAILY_TOKEN_HARD_CAP}. "
+                "Bedrock calls are blocked until tomorrow."
+            ),
+        )
+        return "I've hit my limit for today — talk to you tomorrow!"
+
     memory_context = await query_memories(user.phone_number, message, db, top_k=3)
     system_prompt = build_system_prompt(user, memory_context)
+
+    # Soft cap: nudge Claude to be brief
+    if current_tokens >= s.BEDROCK_DAILY_TOKEN_SOFT_CAP:
+        system_prompt += "\n\nIMPORTANT: Token budget is nearly exhausted. Reply in 1 sentence only."
+        logger.info("User %s near soft token cap (%d), brevity nudge applied", user.phone_number, current_tokens)
 
     history = _get_conv_history(user.phone_number, r)
     messages = history + [{"role": "user", "content": message}]
@@ -201,8 +241,12 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
 
     for iteration in range(5):
         logger.info("Agentic loop iter %d — calling Bedrock", iteration)
-        response = await call_claude_with_tools(messages, system_prompt)
-        logger.info("Agentic loop iter %d — stop_reason=%s", iteration, response.get("stop_reason"))
+        response, tokens_used = await call_claude_with_tools(messages, system_prompt)
+        _increment_token_usage(user.phone_number, tokens_used, r)
+        logger.info(
+            "Agentic loop iter %d — stop_reason=%s tokens=%d",
+            iteration, response.get("stop_reason"), tokens_used,
+        )
 
         if response.get("stop_reason") == "end_turn":
             reply_text = _extract_text_content(response)

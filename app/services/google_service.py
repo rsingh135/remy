@@ -23,6 +23,7 @@ from datetime import timezone
 from typing import Any
 
 from fastapi import HTTPException
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -31,6 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.google_token import UserGoogleToken
+
+
+class GoogleTokenExpiredError(Exception):
+    """Raised when a Google refresh token has been revoked or is permanently invalid."""
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,11 @@ async def get_google_service(
             )
         try:
             await asyncio.to_thread(_refresh_sync, creds)
+        except RefreshError as exc:
+            logger.warning("Google refresh token revoked for %s: %s", user_phone, exc)
+            raise GoogleTokenExpiredError(
+                f"Google authorization has expired for this user. They need to reconnect."
+            ) from exc
         except Exception as exc:
             logger.exception("Token refresh failed for %s", user_phone)
             raise HTTPException(

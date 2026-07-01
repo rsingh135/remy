@@ -57,4 +57,13 @@ def send_reminder(self, phone_number: str, message: str) -> None:
         r.delete(dedup_key)
         r.delete(content_key)
         logger.error("Failed to send reminder to %s: %s", phone_number, exc)
+        if self.request.retries >= self.max_retries:
+            from app.services.alerting import send_admin_alert
+            send_admin_alert(
+                subject="[Remy] Reminder delivery failed permanently",
+                message=(
+                    f"send_reminder task {self.request.id} exhausted all retries "
+                    f"for user {phone_number}. Error: {exc}"
+                ),
+            )
         raise self.retry(exc=exc)

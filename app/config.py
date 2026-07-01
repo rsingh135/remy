@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     DEV_SKIP_SNS_VERIFY: bool = False  # Set true in tests to bypass signature check
 
+    # Observability
+    CLOUDWATCH_LOG_GROUP: str = ""  # e.g. "remy-api" — empty disables CloudWatch shipping
+    ADMIN_ALERT_SNS_TOPIC_ARN: str = ""  # SNS topic for ops alerts — empty disables
+    QUEUE_DEPTH_ALERT_THRESHOLD: int = 50  # Celery queue length that triggers an alert
+
+    # Bedrock cost guardrails (tokens per user per day)
+    BEDROCK_DAILY_TOKEN_SOFT_CAP: int = 50000   # nudge Claude to be brief above this
+    BEDROCK_DAILY_TOKEN_HARD_CAP: int = 100000  # block Bedrock calls above this
+
 
 @lru_cache
 def get_settings() -> Settings:

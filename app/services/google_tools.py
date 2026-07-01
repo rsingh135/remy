@@ -168,3 +168,56 @@ async def send_gmail_message(
 
     logger.info("Gmail sent for %s → %s", user_phone, to_email)
     return {"message_id": sent["id"], "thread_id": sent.get("threadId", "")}
+
+
+async def read_gmail_messages(
+    user_phone: str,
+    db: AsyncSession,
+    max_results: int = 5,
+) -> dict:
+    """
+    Fetch recent emails from the user's Gmail inbox.
+
+    Returns sender, subject, date, and a short snippet for each message.
+    max_results is capped at 10 to stay within SMS reply size limits.
+    """
+    max_results = min(max_results, 10)
+    service = await get_google_service(user_phone, "gmail", "v1", db)
+
+    try:
+        list_result = await asyncio.to_thread(
+            lambda: service.users()
+            .messages()
+            .list(userId="me", maxResults=max_results, labelIds=["INBOX"])
+            .execute()
+        )
+    except HttpError as exc:
+        logger.exception("Gmail list failed for %s", user_phone)
+        raise HTTPException(status_code=502, detail=f"Gmail error: {exc}") from exc
+
+    messages = list_result.get("messages", [])
+    if not messages:
+        return {"emails": [], "count": 0}
+
+    emails = []
+    for msg in messages:
+        try:
+            detail = await asyncio.to_thread(
+                lambda m=msg: service.users()
+                .messages()
+                .get(userId="me", id=m["id"], format="metadata",
+                     metadataHeaders=["From", "Subject", "Date"])
+                .execute()
+            )
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            emails.append({
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(no subject)"),
+                "date": headers.get("Date", ""),
+                "snippet": detail.get("snippet", ""),
+            })
+        except HttpError:
+            logger.warning("Could not fetch Gmail message %s for %s", msg["id"], user_phone)
+
+    logger.info("Gmail inbox fetched for %s: %d messages", user_phone, len(emails))
+    return {"emails": emails, "count": len(emails)}

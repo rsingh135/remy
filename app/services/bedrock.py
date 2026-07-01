@@ -240,7 +240,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "field": {
                     "type": "string",
-                    "enum": ["persona_style", "core_goal", "objective"],
+                    "enum": ["persona_style", "core_goal", "objective", "gmail_read_enabled"],
                     "description": "Which profile field to update",
                 },
                 "value": {
@@ -248,7 +248,8 @@ TOOL_DEFINITIONS = [
                     "description": (
                         "New value. For persona_style: chill_coach | no_bs_peer | drill_sergeant. "
                         "For objective: study_buddy | habit_architect | idea_vault | hybrid. "
-                        "For core_goal: free text describing the user's main goal."
+                        "For core_goal: free text describing the user's main goal. "
+                        "For gmail_read_enabled: 'true' to enable Gmail reading, 'false' to disable."
                     ),
                 },
             },
@@ -324,6 +325,24 @@ TOOL_DEFINITIONS = [
             "required": [],
         },
     },
+    {
+        "name": "read_gmail",
+        "description": (
+            "Read recent emails from the user's Gmail inbox. "
+            "Use when the user asks to check their email, see recent messages, or read their inbox. "
+            "Only works if the user has enabled Gmail reading — if not, you'll get instructions to tell them how to enable it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_results": {
+                    "type": "integer",
+                    "description": "How many recent emails to fetch (default 5, max 10)",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -352,7 +371,15 @@ def _invoke_model_sync(body: dict) -> dict:
     return json.loads(response["body"].read())
 
 
-async def call_claude_with_tools(messages: list[dict], system_prompt: str) -> dict:
+async def call_claude_with_tools(
+    messages: list[dict], system_prompt: str
+) -> tuple[dict, int]:
+    """
+    Invoke Claude via Bedrock and return (response_dict, tokens_used).
+
+    tokens_used is the sum of input + output tokens for this single call.
+    Callers accumulate this across the agentic loop for budget tracking.
+    """
     body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 400,
@@ -361,4 +388,7 @@ async def call_claude_with_tools(messages: list[dict], system_prompt: str) -> di
         "tools": TOOL_DEFINITIONS,
         "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
     }
-    return await asyncio.to_thread(_invoke_model_sync, body)
+    response = await asyncio.to_thread(_invoke_model_sync, body)
+    usage = response.get("usage", {})
+    tokens_used = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+    return response, tokens_used

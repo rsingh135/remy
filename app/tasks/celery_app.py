@@ -10,7 +10,7 @@ def make_celery() -> Celery:
         "remy",
         broker=settings.REDIS_URL,
         backend=settings.REDIS_URL,
-        include=["app.tasks.nightly", "app.tasks.reminders"],
+        include=["app.tasks.nightly", "app.tasks.reminders", "app.tasks.monitoring"],
     )
     app.config_from_object({
         "task_serializer": "json",
@@ -31,6 +31,10 @@ def make_celery() -> Celery:
             "dispatch-nightly-commits": {
                 "task": "app.tasks.nightly.dispatch_nightly_commits",
                 "schedule": crontab(minute="0"),
+            },
+            "check-queue-depth": {
+                "task": "app.tasks.monitoring.check_queue_depth",
+                "schedule": crontab(minute="*/15"),
             },
         },
     })
