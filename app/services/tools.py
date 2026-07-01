@@ -44,10 +44,20 @@ async def execute_tool(
                 return await _tool_store_memory(inputs, user, db)
             case "recall_memories":
                 return await _tool_recall_memories(user, db)
+            case "list_tasks":
+                return await _tool_list_tasks(inputs, user, db)
+            case "update_task":
+                return await _tool_update_task(inputs, user, db)
+            case "query_fitness_summary":
+                return await _tool_query_fitness_summary(inputs, user, db)
+            case "update_profile":
+                return await _tool_update_profile(inputs, user, db)
             case "get_google_auth_link":
                 return _tool_get_google_auth_link(user)
             case "add_calendar_event":
                 return await _tool_add_calendar_event(inputs, user, db)
+            case "list_calendar_events":
+                return await _tool_list_calendar_events(inputs, user, db)
             case "send_gmail":
                 return await _tool_send_gmail(inputs, user, db)
             case _:
@@ -246,6 +256,133 @@ async def _tool_recall_memories(user: User, db: AsyncSession) -> dict:
     }
 
 
+async def _tool_list_tasks(inputs: dict, user: User, db: AsyncSession) -> dict:
+    status_filter = inputs.get("status")
+    stmt = (
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "task")
+        .order_by(Event.timestamp.desc())
+    )
+    if status_filter:
+        stmt = stmt.where(Event.payload["status"].astext == status_filter)
+    else:
+        stmt = stmt.where(Event.payload["status"].astext != "done")
+
+    result = await db.execute(stmt)
+    events = result.scalars().all()
+    return {
+        "tasks": [
+            {
+                "event_id": e.id,
+                "description": e.payload.get("description"),
+                "status": e.payload.get("status"),
+                "priority": e.payload.get("priority"),
+                "deadline": e.payload.get("deadline"),
+            }
+            for e in events
+        ],
+        "count": len(events),
+    }
+
+
+async def _tool_update_task(inputs: dict, user: User, db: AsyncSession) -> dict:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.schemas.payloads import TaskPayload
+
+    event_id = inputs["event_id"]
+    result = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "task")
+        .where(Event.id == event_id)
+    )
+    event = result.scalar_one_or_none()
+    if event is None:
+        return {"error": f"Task {event_id} not found"}
+
+    updated = dict(event.payload)
+    if "status" in inputs:
+        updated["status"] = inputs["status"]
+    if "priority" in inputs:
+        updated["priority"] = inputs["priority"]
+
+    try:
+        validated = TaskPayload(**updated)
+    except Exception as exc:
+        return {"error": f"Invalid task data: {exc}"}
+
+    event.payload = validated.model_dump(mode="json")
+    flag_modified(event, "payload")
+    await db.commit()
+
+    return {"status": "updated", "event_id": event_id, "task": event.payload}
+
+
+async def _tool_query_fitness_summary(inputs: dict, user: User, db: AsyncSession) -> dict:
+    from datetime import timedelta
+
+    period = inputs.get("period", "week")
+    now = datetime.now(tz=timezone.utc)
+
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        start = now - timedelta(days=7)
+    elif period == "month":
+        start = now - timedelta(days=30)
+    else:
+        return {"error": f"Unknown period '{period}'. Use 'today', 'week', or 'month'."}
+
+    result = await db.execute(
+        select(Event)
+        .where(Event.user_phone == user.phone_number)
+        .where(Event.event_type == "fitness_log")
+        .where(Event.timestamp >= start)
+        .order_by(Event.timestamp)
+    )
+    events = result.scalars().all()
+
+    total_protein = sum(e.payload.get("protein_grams") or 0 for e in events)
+    total_water = sum(e.payload.get("water_liters") or 0 for e in events)
+    workouts = [e.payload["workout_type"] for e in events if e.payload.get("workout_type")]
+
+    return {
+        "period": period,
+        "log_count": len(events),
+        "total_protein_grams": round(total_protein, 1),
+        "total_water_liters": round(total_water, 2),
+        "workouts": workouts,
+        "workout_count": len(workouts),
+    }
+
+
+_VALID_PERSONAS = {"chill_coach", "no_bs_peer", "drill_sergeant"}
+_VALID_OBJECTIVES = {"study_buddy", "habit_architect", "idea_vault", "hybrid"}
+
+
+async def _tool_update_profile(inputs: dict, user: User, db: AsyncSession) -> dict:
+    field = inputs["field"]
+    value = inputs["value"]
+
+    if field == "persona_style":
+        if value not in _VALID_PERSONAS:
+            return {"error": f"Invalid persona_style '{value}'. Choose from: {sorted(_VALID_PERSONAS)}"}
+        user.persona_style = value
+    elif field == "core_goal":
+        user.core_goal = value[:500]
+    elif field == "objective":
+        if value not in _VALID_OBJECTIVES:
+            return {"error": f"Invalid objective '{value}'. Choose from: {sorted(_VALID_OBJECTIVES)}"}
+        user.objective = value
+    else:
+        return {"error": f"Cannot update '{field}'. Allowed fields: persona_style, core_goal, objective"}
+
+    await db.commit()
+    return {"status": "updated", "field": field, "value": value}
+
+
 def is_affirmative(message: str) -> bool:
     lower = message.lower().strip()
     return any(keyword in lower for keyword in _AFFIRMATIVE_KEYWORDS)
@@ -289,6 +426,21 @@ async def _tool_add_calendar_event(
         end_time_iso=inputs["end_time_iso"],
         db=db,
         description=inputs.get("description"),
+    )
+
+
+async def _tool_list_calendar_events(
+    inputs: dict,
+    user: User,
+    db: AsyncSession,
+) -> dict:
+    from app.services.google_tools import list_calendar_events
+    return await list_calendar_events(
+        user_phone=user.phone_number,
+        time_min_iso=inputs["time_min_iso"],
+        time_max_iso=inputs["time_max_iso"],
+        db=db,
+        max_results=inputs.get("max_results", 10),
     )
 
 

@@ -82,6 +82,50 @@ async def add_calendar_event(
     return {"event_id": created["id"], "link": created.get("htmlLink", "")}
 
 
+async def list_calendar_events(
+    user_phone: str,
+    time_min_iso: str,
+    time_max_iso: str,
+    db: AsyncSession,
+    max_results: int = 10,
+) -> dict:
+    service = await get_google_service(user_phone, "calendar", "v3", db)
+
+    try:
+        result = await asyncio.to_thread(
+            lambda: service.events()
+            .list(
+                calendarId="primary",
+                timeMin=time_min_iso,
+                timeMax=time_max_iso,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        logger.exception("Calendar list failed for %s", user_phone)
+        raise HTTPException(
+            status_code=502, detail=f"Google Calendar error: {exc}"
+        ) from exc
+
+    items = result.get("items", [])
+    return {
+        "events": [
+            {
+                "title": e.get("summary", "(no title)"),
+                "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
+                "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
+                "description": e.get("description"),
+                "event_id": e.get("id"),
+            }
+            for e in items
+        ],
+        "count": len(items),
+    }
+
+
 async def send_gmail_message(
     user_phone: str,
     to_email: str,

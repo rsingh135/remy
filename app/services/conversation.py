@@ -142,6 +142,11 @@ HARD RULES — FOLLOW EXACTLY:
    - User asks what you remember about them → call recall_memories and summarize the results.
    - User asks about their streak → answer directly from USER PROFILE above. Do not call a tool.
    - User logs workout / water / food → call log_event.
+   - User asks to see their tasks / to-do list → call list_tasks.
+   - User marks a task done or changes its priority → call list_tasks to find the event_id, then call update_task.
+   - User asks about fitness stats, protein, water, workouts → call query_fitness_summary with the relevant period.
+   - User asks to change their persona, goal, or focus → call update_profile with the correct field and value.
+   - User asks what's on their calendar / what's coming up → call list_calendar_events with appropriate ISO datetime range.
    - User shares a personal fact (habit, goal, deadline, preference, struggle, win) → call store_memory.
    - "connect Google" / "add to calendar" / "send email" → call the relevant Google tool.
    Resolve ALL relative times ("tomorrow", "in 2 hours") to absolute UTC ISO strings

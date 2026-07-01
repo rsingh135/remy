@@ -166,6 +166,124 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "list_tasks",
+        "description": (
+            "List the user's tasks from the database. "
+            "By default returns only open tasks (pending or in_progress). "
+            "Pass status='done' to see completed tasks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "done"],
+                    "description": "Optional status filter. Omit to return all non-done tasks.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "update_task",
+        "description": (
+            "Update a task's status or priority. "
+            "Call list_tasks first to get the event_id, then call this to modify it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "integer",
+                    "description": "The event_id of the task to update (from list_tasks)",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "done"],
+                    "description": "New status for the task",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "New priority for the task",
+                },
+            },
+            "required": ["event_id"],
+        },
+    },
+    {
+        "name": "query_fitness_summary",
+        "description": (
+            "Summarise the user's fitness logs over a time period. "
+            "Use when they ask about protein totals, water intake, or workout frequency."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "enum": ["today", "week", "month"],
+                    "description": "The time window to aggregate. Defaults to 'week'.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "update_profile",
+        "description": (
+            "Update the user's persona style, core goal, or objective. "
+            "Use when the user asks to change their persona, update their goal, or switch their focus."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "enum": ["persona_style", "core_goal", "objective"],
+                    "description": "Which profile field to update",
+                },
+                "value": {
+                    "type": "string",
+                    "description": (
+                        "New value. For persona_style: chill_coach | no_bs_peer | drill_sergeant. "
+                        "For objective: study_buddy | habit_architect | idea_vault | hybrid. "
+                        "For core_goal: free text describing the user's main goal."
+                    ),
+                },
+            },
+            "required": ["field", "value"],
+        },
+    },
+    {
+        "name": "list_calendar_events",
+        "description": (
+            "Read upcoming events from the user's Google Calendar. "
+            "Use when they ask what's on their calendar, what's coming up, or mention a specific date."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "time_min_iso": {
+                    "type": "string",
+                    "description": (
+                        "Start of the time window (ISO 8601 with timezone offset). "
+                        "Resolve relative phrases like 'Thursday' using CURRENT UTC TIME above."
+                    ),
+                },
+                "time_max_iso": {
+                    "type": "string",
+                    "description": "End of the time window (ISO 8601 with timezone offset)",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of events to return (default 10)",
+                },
+            },
+            "required": ["time_min_iso", "time_max_iso"],
+        },
+    },
+    {
         "name": "list_reminders",
         "description": (
             "List all pending (not yet fired) reminders for the user. "
