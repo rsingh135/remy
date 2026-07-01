@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     BEDROCK_DAILY_TOKEN_SOFT_CAP: int = 50000   # nudge Claude to be brief above this
     BEDROCK_DAILY_TOKEN_HARD_CAP: int = 100000  # block Bedrock calls above this
 
+    # REST API auth (iOS app)
+    JWT_SECRET: str = "change-me-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_HOURS: int = 24 * 30  # 30-day tokens
+    OTP_TTL_SECONDS: int = 600  # 10 minutes
+
 
 @lru_cache
 def get_settings() -> Settings:

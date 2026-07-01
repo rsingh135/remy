@@ -121,7 +121,7 @@ def _sync_delete(phones: list[str]) -> None:
     engine = create_engine(s.DATABASE_URL_SYNC)
     with engine.connect() as conn:
         for phone in phones:
-            conn.execute(text("DELETE FROM users WHERE phone_number = :p"), {"p": phone})
+            conn.execute(text("DELETE FROM users WHERE contact_id = :p"), {"p": phone})
         conn.commit()
     engine.dispose()
 

@@ -1,0 +1,12 @@
+line-length = 120
+
+[lint]
+select = ["E", "F"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "F401",   # unused imports — handled case-by-case (some are re-exports)
+    "F541",   # f-string without placeholders — pre-existing in google_service
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402", "F841"]  # test env setup pattern; unused vars in mocks

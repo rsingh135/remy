@@ -12,6 +12,8 @@ from app.config import get_settings
 from app.database import engine
 from app.limiter import limiter
 from app.logging_config import request_id_var, setup_logging
+from app.routes.api.auth import router as api_auth_router
+from app.routes.api.me import router as api_me_router
 from app.routes.google_auth import router as google_auth_router
 from app.routes.photon_webhook import router as photon_router
 from app.routes.sms import router as sms_router
@@ -47,6 +49,8 @@ app.add_middleware(RequestIdMiddleware)
 app.include_router(sms_router, prefix="/sms", tags=["sms"])
 app.include_router(google_auth_router, prefix="/sms", tags=["google-auth"])
 app.include_router(photon_router, prefix="/sms", tags=["photon"])
+app.include_router(api_auth_router, prefix="/api", tags=["api-auth"])
+app.include_router(api_me_router, prefix="/api", tags=["api"])
 
 
 @app.get("/health")
