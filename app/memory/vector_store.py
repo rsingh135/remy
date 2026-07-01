@@ -43,13 +43,21 @@ async def get_embedding(text: str) -> list[float]:
     return await asyncio.to_thread(_get_embedding_sync, text)
 
 
+_DEDUP_THRESHOLD = 0.92
+
+
 async def store_memory(
     phone: str,
     category: str,
     memory_text: str,
     db: AsyncSession,
-) -> Memory:
+) -> Memory | None:
     embedding = await get_embedding(memory_text)
+
+    existing = await query_memories(phone, memory_text, db, category=category, top_k=1)
+    if existing and existing[0].similarity >= _DEDUP_THRESHOLD:
+        return None
+
     memory = Memory(
         user_phone=phone,
         category=category,

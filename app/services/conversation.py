@@ -237,6 +237,13 @@ async def handle_main_conversation(user: User, message: str, db: AsyncSession) -
     return reply_text
 
 
+_STREAK_MILESTONES: dict[int, str] = {
+    7:   "7 days straight. that's a full week — most people don't make it here. keep going.",
+    30:  "30 days. a whole month of showing up. that's not luck, that's who you are now.",
+    100: "100 days. that's elite. seriously — take a second to recognize what you built.",
+}
+
+
 async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -> None:
     if not is_affirmative(message):
         return
@@ -254,6 +261,10 @@ async def _check_and_update_streak(user: User, message: str, db: AsyncSession) -
         user.streak_count += 1
         await db.commit()
         r.delete(redis_key)
+
+        celebration = _STREAK_MILESTONES.get(user.streak_count)
+        if celebration:
+            await _send_reply(user.phone_number, celebration)
 
 
 async def _send_reply(phone: str, message: str) -> None:
